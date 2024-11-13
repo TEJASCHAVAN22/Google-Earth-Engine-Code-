@@ -1,0 +1,49 @@
+var roi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric')
+                                            .filter(ee.Filter.eq('dt_code', 526));
+Map.centerObject(roi);
+
+//--------time-------------------------------------------------------
+var time_start = '2000-01-01';
+var time_end = '2023-12-31';
+
+//-----------ee.imageCollection------------------------------------------
+var era5 = ee.ImageCollection("ECMWF/ERA5_LAND/MONTHLY_AGGR")
+  .select('temperature_2m')
+  .filterDate(time_start, time_end);
+
+//----------------------------------------------------
+function temporal_collection(collection, start, count, interval, unit){
+  var seq = ee.List.sequence(0, ee.Number(count).subtract(1));
+  var origin_date = ee.Date(start);
+  return ee.ImageCollection(seq.map(function(i){
+    var start_date = origin_date.advance(ee.Number(interval).multiply(i), unit);
+    var end_date = start_date.advance(1, unit);  // Advance by 1 month
+    return collection.filterDate(start_date, end_date).mean()
+      .set('system:time_start', start_date.millis())
+      .set('system:time_end', end_date.millis());
+  }));
+}
+
+// Adjusting count to number of months from 1990 to 2023
+var totalMonths = ee.Date(time_end).difference(ee.Date(time_start), 'month').round();
+var monthly = temporal_collection(era5, time_start, totalMonths, 1, 'month')
+  .map(function(img){
+    return img.subtract(273.15)  // Convert from Kelvin to Celsius
+      .copyProperties(img, img.propertyNames());
+  });
+
+print(ui.Chart.image.series(monthly, roi, ee.Reducer.mean(), 10000, 'system:time_start'));
+
+//------------------------------------------------------------
+// Calculate percent change
+var temp_mean = monthly.mean(); // Monthly mean temperature over entire period
+
+var change = monthly.map(function(img){
+  var eq = img.expression('((temp - mean) / mean) * 100', {
+    'temp': img, 'mean': temp_mean
+  }).rename('temp_change');
+  return eq.copyProperties(img, img.propertyNames());
+});
+
+print(ui.Chart.image.series(change, roi, ee.Reducer.mean(), 10000, 'system:time_start')
+  .setChartType('ColumnChart'));
