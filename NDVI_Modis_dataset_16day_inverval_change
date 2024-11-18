@@ -1,0 +1,61 @@
+var roi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric')
+    .filter(ee.Filter.eq('dt_code', 526));
+Map.centerObject(roi);
+
+//--------time-------------------------------------------------------
+var time_start = '2015-01-01';
+var time_end = '2023-12-31';
+
+//-----------ee.imageCollection for MODIS NDVI-----------------------
+var modisNDVI = ee.ImageCollection("MODIS/061/MOD13Q1")
+  .select('NDVI')
+  .filterDate(time_start, time_end)
+  .filterBounds(roi)
+  .map(function(img) {
+    return img.multiply(0.0001)  // Scale factor for NDVI
+      .copyProperties(img, img.propertyNames());
+  });
+
+//----------------------------------------------------
+function temporal_collection(collection, start, count, interval, unit) {
+  var seq = ee.List.sequence(0, ee.Number(count).subtract(1));
+  var origin_date = ee.Date(start);
+  return ee.ImageCollection(seq.map(function(i) {
+    var start_date = origin_date.advance(ee.Number(interval).multiply(i), unit);
+    var end_date = start_date.advance(interval, unit);
+    return collection.filterDate(start_date, end_date).mean()
+      .set('system:time_start', start_date.millis())
+      .set('system:time_end', end_date.millis());
+  }));
+}
+
+// Adjusting count to number of 16-day intervals
+var totalIntervals = ee.Date(time_end).difference(ee.Date(time_start), 'day').divide(16).round();
+var ndviCollection = temporal_collection(modisNDVI, time_start, totalIntervals, 16, 'day');
+
+// Plotting NDVI time series
+print(ui.Chart.image.series(ndviCollection, roi, ee.Reducer.mean(), 500, 'system:time_start')
+  .setOptions({
+    title: 'NDVI Time Series',
+    vAxis: { title: 'Mean NDVI' },
+    hAxis: { title: 'Date' }
+  }));
+
+//------------------------------------------------------------
+// Calculate percent change relative to the mean NDVI
+var ndvi_mean = ndviCollection.mean();
+
+var change = ndviCollection.map(function(img) {
+  var eq = img.expression('((ndvi - mean) / mean) * 100', {
+    'ndvi': img, 'mean': ndvi_mean
+  }).rename('ndvi_change');
+  return eq.copyProperties(img, img.propertyNames());
+});
+
+print(ui.Chart.image.series(change, roi, ee.Reducer.mean(), 500, 'system:time_start')
+  .setChartType('ColumnChart')
+  .setOptions({
+    title: 'Percent Change in NDVI',
+    vAxis: { title: 'NDVI Change (%)' },
+    hAxis: { title: 'Date' }
+  }));
