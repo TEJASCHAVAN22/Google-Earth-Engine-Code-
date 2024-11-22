@@ -1,0 +1,70 @@
+var roi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric')
+    .filter(ee.Filter.eq('dt_code', 526));
+Map.centerObject(roi);
+
+//--------time-------------------------------------------------------
+var time_start = '2015-01-01';
+var time_end = '2023-12-31';
+
+//-----------ee.imageCollection for MODIS NDVI-----------------------
+var modisNDVI = ee.ImageCollection("MODIS/061/MOD13Q1")
+  .select('NDVI')
+  .filterDate(time_start, time_end)
+  .filterBounds(roi)
+  .map(function(img) {
+    return img.multiply(0.0001)  // Scale factor for NDVI
+      .copyProperties(img, img.propertyNames());
+  });
+
+//----------------------------------------------------
+function temporal_collection(collection, start, count, interval, unit) {
+  var seq = ee.List.sequence(0, ee.Number(count).subtract(1));
+  var origin_date = ee.Date(start);
+  return ee.ImageCollection(seq.map(function(i) {
+    var start_date = origin_date.advance(ee.Number(interval).multiply(i), unit);
+    var end_date = start_date.advance(interval, unit);
+    return collection.filterDate(start_date, end_date).mean()
+      .set('system:time_start', start_date.millis())
+      .set('system:time_end', end_date.millis());
+  }));
+}
+
+// Adjusting count to number of 16-day intervals
+var totalIntervals = ee.Date(time_end).difference(ee.Date(time_start), 'day').divide(16).round();
+var ndviCollection = temporal_collection(modisNDVI, time_start, totalIntervals, 16, 'day');
+
+// Calculate VCI
+var ndvi_min = ndviCollection.reduce(ee.Reducer.min());
+var ndvi_max = ndviCollection.reduce(ee.Reducer.max());
+
+var vciCollection = ndviCollection.map(function(img) {
+  var vci = img.expression('((ndvi - min) / (max - min)) * 100', {
+    'ndvi': img,
+    'min': ndvi_min,
+    'max': ndvi_max
+  }).rename('VCI');
+  return vci.copyProperties(img, img.propertyNames());
+});
+
+// Plotting VCI time series
+print(ui.Chart.image.series(vciCollection, roi, ee.Reducer.mean(), 500, 'system:time_start')
+  .setOptions({
+    title: 'VCI Time Series',
+    vAxis: { title: 'VCI (%)' },
+    hAxis: { title: 'Date' }
+  }));
+
+// Optional: Export VCI Collection
+Export.table.toDrive({
+  collection: vciCollection.map(function(img) {
+    return img.reduceRegions({
+      collection: roi,
+      reducer: ee.Reducer.mean(),
+      scale: 500
+    }).map(function(f) {
+      return f.set('time', img.get('system:time_start'));
+    });
+  }).flatten(),
+  description: 'VCI_TimeSeries',
+  fileFormat: 'CSV'
+});
