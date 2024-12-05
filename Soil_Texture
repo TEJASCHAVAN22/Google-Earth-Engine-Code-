@@ -1,0 +1,79 @@
+// Load the soil texture dataset (USDA soil texture classification)
+var dataset = ee.Image('OpenLandMap/SOL/SOL_TEXTURE-CLASS_USDA-TT_M/v02');
+print(dataset);
+
+// Define visualization parameters for soil texture classes
+var visualization = {
+  bands: ['b0'],
+  min: 1.0,
+  max: 12.0,
+  palette: ['d5c36b','b96947', '9d3706', 'ae868f', 'f86714', '46d143',
+            '368f20','3e5a14', 'ffd557', 'fff72e', 'ff5a9d', 'ff005b']
+};
+
+// Define the area of interest: Entire India
+// var india = ee.FeatureCollection('USDOS/LSIB_SIMPLE/2017')
+//               .filter(ee.Filter.eq('country_na', 'India'));
+var india = ee.FeatureCollection('projects/gee-trial2/assets/IND_Shapefiles/IND');
+              
+// Clip the dataset to the area of interest (India)
+var datasetIndia = dataset.clip(india);
+
+// Add the soil texture class layer to the map
+Map.addLayer(datasetIndia, visualization, 'Soil Texture Class (USDA System)');
+
+// Center the map on India with appropriate zoom level
+Map.setCenter(78.9629, 20.5937, 4.5);  // Centered on India with zoom level 5
+
+// Add a legend to the map
+function addLegend(title, palette, names, position) {
+  var legend = ui.Panel({
+    style: {
+      position: position,
+      padding: '8px 15px'
+    }
+  });
+
+  var legendTitle = ui.Label({
+    value: title,
+    style: {fontWeight: 'bold', fontSize: '16px', margin: '0 0 4px 0'}
+  });
+
+  legend.add(legendTitle);
+
+  for (var i = 0; i < palette.length; i++) {
+    var colorBox = ui.Label({
+      style: {
+        backgroundColor: palette[i],
+        padding: '8px',
+        margin: '0 0 4px 0'
+      }
+    });
+
+    var description = ui.Label({
+      value: names[i],
+      style: {margin: '0 0 4px 6px'}
+    });
+
+    var legendItem = ui.Panel({
+      widgets: [colorBox, description],
+      layout: ui.Panel.Layout.Flow('horizontal')
+    });
+
+    legend.add(legendItem);
+  }
+
+  Map.add(legend);
+}
+
+// Define the palette and names for the soil texture legend at different depths
+var soilTexturePalette = ['d5c36b', 'b96947', '9d3706', 'ae868f', 'f86714', '46d143'];
+var soilTextureNames = ['Soil texture class (USDA system) at 0 cm depth',
+                        'Soil texture class (USDA system) at 10 cm depth',
+                        'Soil texture class (USDA system) at 30 cm depth',
+                        'Soil texture class (USDA system) at 60 cm depth',
+                        'Soil texture class (USDA system) at 100 cm depth',
+                        'Soil texture class (USDA system) at 200 cm depth'];
+
+// Add the legend for soil textures at different depths
+addLegend('Soil Texture Class (USDA System)', soilTexturePalette, soilTextureNames, 'bottom-left');
