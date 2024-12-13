@@ -1,0 +1,32 @@
+
+
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 5); 
+
+
+// Load Sentinel-2 dataset
+var sentinel2 = ee.ImageCollection('COPERNICUS/S2')
+                              .filterBounds(aoi)  // Replace 'geometry' with your area of interest
+                              .filterDate('2020-04-11', '2020-04-12')  // Replace with your date range
+                              .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10))  // Filter for cloud-free images
+                              .median();  // Take the median to reduce noise
+
+// Select the bands required for STR calculation from the median image
+var red = sentinel2.select('B4');  // Red band
+var swir = sentinel2.select('B11');  // SWIR band
+
+// Calculate Soil Tillage Ratio (STR) using NDTI formula
+var str = red.subtract(swir).divide(red.add(swir)).rename('STR');
+
+// Add STR layer to map
+Map.addLayer(str.clip(aoi), {min: -1, max: 1, palette: ['blue', 'white', 'green']}, 'Soil Tillage Ratio');
+
+// Export the STR image for further analysis
+Export.image.toDrive({
+  image: str,
+  description: 'STR_30',
+  scale: 30,  // Adjust scale as per requirement
+  region: aoi,  // Replace with your area of interest
+  maxPixels: 1e13
+});
+
