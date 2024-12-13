@@ -1,0 +1,42 @@
+// Scale MODIS Vegetation Indices by a factor of 0.0001
+var scaleMOD = function(image2) {
+        return  image2
+          .divide(10000) //divide image values by 10000
+          .float() // convert to float
+          .set("system:time_start", image2.get("system:time_start")); // keep time info
+};
+
+
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 5);
+
+// Sentinel-2 ImageCollection (Surface Reflectance)
+var dataset = ee.ImageCollection('COPERNICUS/S2_SR')
+                  .filter(ee.Filter.bounds(aoi))
+                  .filterDate('2020-02-24', '2020-02-25')
+                  .map(function(image) {
+                    var ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI'); // NDVI calculation using Sentinel-2 bands
+                    return ndvi;
+                  });
+
+// Visualization parameters
+var ndviVis = {
+  min: 0,
+  max: 1,
+  palette: ['red', 'yellow', 'green'],
+};
+
+Map.addLayer(dataset.map(function(image) {
+  return image.clip(aoi);
+}), ndviVis, 'NDVI');
+
+// Export the image collection to Drive
+Export.image.toDrive({
+  image: dataset.mean(),
+  description: 'Sentinel_NDVI_30',
+  scale: 30,
+  region: aoi,
+  maxPixels: 2e9,
+  fileFormat: 'GeoTIFF'
+});
+
