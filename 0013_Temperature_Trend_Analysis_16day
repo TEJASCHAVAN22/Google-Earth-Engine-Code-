@@ -3,27 +3,30 @@ var roi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric'
 Map.addLayer(roi, { color: 'red' }, 'ROI');
 Map.centerObject(roi, 4.4);
 
-// Load ERA5 Daily dataset and filter for temperature
-var era = ee.ImageCollection("ECMWF/ERA5_LAND/DAILY")
-                               .select('temperature_2m')
-                               .filterDate('2015-01-01', '2023-12-31');
+// Load MODIS daily Land Surface Temperature dataset
+var modis = ee.ImageCollection("MODIS/061/MOD11A2")
+             .select('LST_Day_1km')
+             .filterDate('2015-01-01', '2023-12-31');
 
 // Convert temperature from Kelvin to Celsius
-var temp = era.map(function(img) {
+var temp = modis.map(function(img) {
   return img.subtract(273.15).set('system:time_start', img.get('system:time_start'));
 });
 
 // Function to aggregate daily data to 16-day intervals
 var aggregateTo16Days = function(startDate, endDate) {
-  return temp.filterDate(startDate, endDate).mean().set('system:time_start', ee.Date(startDate).millis());
+  return modis.filterDate(startDate, endDate).mean().set('system:time_start', ee.Date(startDate).millis());
 };
 
+// Convert the string date to an ee.Date object and then to milliseconds
+var startDate = ee.Date('2015-01-01');
+
 // Create a list of start dates for 16-day intervals within the time range
-var startDates = ee.List.sequence('2015-01-01', '2023-12-31', 16 * 24 * 3600 * 1000); // 16 days in milliseconds
+var startDates = ee.List.sequence(startDate.millis(), ee.Date('2023-12-31').millis(), 16 * 24 * 3600 * 1000); // 16 days in milliseconds
 
 // Aggregate the temperature data for each 16-day interval
-var temp16Day = ee.ImageCollection(startDates.map(function(date) {
-  var startDate = ee.Date(date);
+var temp16Day = ee.ImageCollection(startDates.map(function(dateMillis) {
+  var startDate = ee.Date(dateMillis);
   var endDate = startDate.advance(16, 'day');
   return aggregateTo16Days(startDate.format('YYYY-MM-dd'), endDate.format('YYYY-MM-dd'));
 }));
@@ -45,7 +48,7 @@ var tempDateVal = temp16Day.map(function(img) {
     reducer: ee.Reducer.first(),
     geometry: roi,
     scale: 1000
-  }).get('temperature_2m');
+  }).get('LST_Day_1km');
   
   var dateVal = ee.Date(img.get('system:time_start')).format('YYYY-MM-dd');
   return ee.Feature(null, { 'date': dateVal, 'temp': tempVal });
@@ -61,7 +64,7 @@ var chart = ui.Chart.feature.byFeature({
   yProperties: ['temp']
 }).setChartType('LineChart')
   .setOptions({
-    title: 'Temperature Trend (°C) - 16-day Intervals',
+    title: 'Land Surface Temperature Trend (°C) - 16-day Intervals',
     hAxis: { title: 'Date' },
     vAxis: { title: 'Temperature (°C)' },
     pointSize: 2,
@@ -74,4 +77,3 @@ print('Temperature Trend Chart', chart);
 
 // Log the temperature values in the console for verification
 print('Temperature Data Collection:', tempCollection);
-
