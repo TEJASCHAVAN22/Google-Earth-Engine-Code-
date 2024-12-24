@@ -1,0 +1,62 @@
+// Load the ROI from an asset
+var roi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.addLayer(roi, { color: 'red' }, 'ROI');
+Map.centerObject(roi, 4.4);
+
+// Load ERA5 Monthly Aggregated dataset and filter for temperature
+var era = ee.ImageCollection("ECMWF/ERA5_LAND/MONTHLY_AGGR")
+                               .select('temperature_2m')
+                               .filterDate('2015-01-01', '2023-12-31');
+
+// Convert temperature from Kelvin to Celsius
+var temp = era.map(function(img) {
+  return img.subtract(273.15).set('system:time_start', img.get('system:time_start'));
+});
+
+// Calculate the mean temperature for the entire time range
+var meanTemp = temp.mean();
+
+// Visualize the mean temperature as a layer
+var meanTempVis = {
+  min: 15, // Adjust based on expected temperature range in Celsius
+  max: 40, // Adjust based on expected temperature range in Celsius
+  palette: ['blue', 'cyan', 'yellow', 'orange', 'red']
+};
+
+Map.addLayer(meanTemp.clip(roi), meanTempVis, 'Mean Temperature');
+
+// Extract temperature values at the ROI
+var tempDateVal = temp.map(function(img) {
+  var tempVal = img.reduceRegion({
+    reducer: ee.Reducer.first(),
+    geometry: roi,
+    scale: 1000
+  }).get('temperature_2m');
+  
+  var dateVal = ee.Date(img.get('system:time_start')).format('YYYY-MM-dd');
+  return ee.Feature(null, { 'date': dateVal, 'temp': tempVal });
+});
+
+// Convert the results to a feature collection
+var tempCollection = ee.FeatureCollection(tempDateVal);
+
+// Create a chart to visualize the temperature trends
+var chart = ui.Chart.feature.byFeature({
+  features: tempCollection,
+  xProperty: 'date',
+  yProperties: ['temp']
+}).setChartType('LineChart')
+  .setOptions({
+    title: 'Temperature Trend (°C)',
+    hAxis: { title: 'Date' },
+    vAxis: { title: 'Temperature (°C)' },
+    pointSize: 2,
+    lineWidth: 1,
+    series: { 0: { color: 'blue' } }
+  });
+
+// Print the chart to the console
+print('Temperature Trend Chart', chart);
+
+// Log the temperature values in the console for verification
+print('Temperature Data Collection:', tempCollection);
