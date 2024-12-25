@@ -1,0 +1,65 @@
+// Load the ROI from an asset
+var roi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.addLayer(roi, { color: 'red' }, 'ROI');
+Map.centerObject(roi, 4.4);
+
+// Load MODIS NDVI dataset (MOD13A2) and filter for NDVI
+var modisNDVI = ee.ImageCollection("MODIS/061/MOD13A2")
+             .select('NDVI')
+             .filterDate('2015-01-01', '2023-12-31');
+
+// Function to scale the NDVI values
+var scaleNDVI = function(img) {
+  return img.multiply(0.0001).set('system:time_start', img.get('system:time_start'));
+};
+
+// Apply scaling to the NDVI dataset
+var scaledNDVI = modisNDVI.map(scaleNDVI);
+
+// Calculate the mean NDVI for the entire time range
+var meanNDVI = scaledNDVI.mean();
+
+// Visualize the mean NDVI as a layer
+var meanNDVIVis = {
+  min: 0, // Adjust based on expected NDVI range (0 to 1)
+  max: 0.8, // Adjust based on expected NDVI range (0 to 1)
+  palette: ['blue', 'green', 'yellow', 'orange', 'red']
+};
+
+Map.addLayer(meanNDVI.clip(roi), meanNDVIVis, 'Mean NDVI');
+
+// Extract NDVI values at the ROI
+var ndviDateVal = scaledNDVI.map(function(img) {
+  var ndviVal = img.reduceRegion({
+    reducer: ee.Reducer.first(),
+    geometry: roi,
+    scale: 1000
+  }).get('NDVI');
+  
+  var dateVal = ee.Date(img.get('system:time_start')).format('YYYY-MM-dd');
+  return ee.Feature(null, { 'date': dateVal, 'ndvi': ndviVal });
+});
+
+// Convert the results to a feature collection
+var ndviCollection = ee.FeatureCollection(ndviDateVal);
+
+// Create a chart to visualize the NDVI trends
+var chart = ui.Chart.feature.byFeature({
+  features: ndviCollection,
+  xProperty: 'date',
+  yProperties: ['ndvi']
+}).setChartType('LineChart')
+  .setOptions({
+    title: 'NDVI Trend',
+    hAxis: { title: 'Date' },
+    vAxis: { title: 'NDVI (Scaled)' },
+    pointSize: 2,
+    lineWidth: 1,
+    series: { 0: { color: 'green' } }
+  });
+
+// Print the chart to the console
+print('NDVI Trend Chart', chart);
+
+// Log the NDVI values in the console for verification
+print('NDVI Data Collection:', ndviCollection);
