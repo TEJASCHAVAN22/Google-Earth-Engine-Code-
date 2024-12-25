@@ -1,7 +1,7 @@
 // Load Rainfall dataset
 var col = ee.ImageCollection('UCSB-CHG/CHIRPS/DAILY')
                                   .select('precipitation'); // Select precipitation band
-                                  
+
 // Define a mask to clip the rainfall data by.
 // Define clipping and region boundary geometries
 var mask = ee.FeatureCollection('projects/gee-trial2/assets/IND_Shapefiles/IND');
@@ -16,32 +16,24 @@ var region = ee.Geometry.Polygon(
   null, false
 );
 
-// Group images by composite date
-col = col.map(function(img) {
-  var doy = ee.Date(img.get('system:time_start')).getRelative('day', 'year');
-  return img.set('doy', doy);
-});
+// Define the time range for the interval
+var startDate = ee.Date('2022-01-01');
+var endDate = ee.Date('2023-01-01');
+var interval = 16; // 16-day interval
 
-// Filter for a specific year
-var distinctDOY = col.filterDate('2022-01-01', '2023-01-01');
+// Generate a sequence of start dates for each 16-day interval
+var dateArray = ee.List.sequence(startDate.millis(), endDate.millis(), interval * 24 * 60 * 60 * 1000);
 
-// Define a filter that identifies which images from the complete collection
-// match the DOY from the distinct DOY collection.
-var filter = ee.Filter.equals({leftField: 'doy', rightField: 'doy'});
-var join = ee.Join.saveAll('doy_matches');
+// Function to create 16-day composites
+var create16DayComposite = function(startMillis) {
+  var start = ee.Date(startMillis);
+  var end = start.advance(interval, 'day');
+  var composite = col.filterDate(start, end).median(); // Median composite for each interval
+  return composite.set('system:time_start', start.millis());
+};
 
-// Apply the join and convert the resulting FeatureCollection to an
-// ImageCollection.
-var joinCol = ee.ImageCollection(join.apply(distinctDOY, col, filter));
-
-// Reduce composite groups
-// Apply median reduction among matching DOY collections.
-var comp = joinCol.map(function(img) {
-  var doyCol = ee.ImageCollection.fromImages(
-    img.get('doy_matches')
-  );
-  return doyCol.reduce(ee.Reducer.median());
-});
+// Create 16-day composites
+var comp = ee.ImageCollection(dateArray.map(create16DayComposite));
 
 // Make visualization images
 // Define visualization parameters for Rainfall.
