@@ -1,0 +1,100 @@
+
+// Load the AOI (Area of Interest)
+var region = ee.FeatureCollection('projects/ee-niasmasis/assets/Shapefiles/IND_Districts');
+Map.centerObject(region, 8);
+
+// Load MODIS Evapotranspiration data (MOD16A2 dataset)
+var modisET = ee.ImageCollection("MODIS/006/MOD16A2")
+                      .filterDate('2005-01-01', '2006-01-01')  // Time period (one year for example)
+                      .select('ET')  // Select the ET band
+                      .map(function(image) {
+                       return image.clip(region);
+                       });
+// Calculate the mean ET for the year
+var meanET = modisET.mean().clip(region);
+
+// Display the mean ET
+Map.addLayer(meanET, {
+  min: 0,
+  max: 500,
+  palette: ['blue', 'green', 'yellow', 'orange', 'red']
+}, 'Mean ET 2020');
+
+// Function to add a legend to the map
+function addLegend(map) {
+  var legend = ui.Panel({
+    style: {
+      position: 'bottom-left',
+      padding: '8px 15px'
+    }
+  });
+
+  var legendTitle = ui.Label({
+    value: 'ET (mm/year)',
+    style: {fontWeight: 'bold', fontSize: '16px'}
+  });
+  legend.add(legendTitle);
+
+  // Legend colors and labels
+  var palette = ['blue', 'green', 'yellow', 'orange', 'red'];
+  var labels = ['Low', 'Moderate', 'High', 'Very High', 'Extreme'];
+
+  for (var i = 0; i < palette.length; i++) {
+    var colorBox = ui.Label({
+      style: {
+        backgroundColor: palette[i],
+        padding: '10px',
+        margin: '4px'
+      }
+    });
+
+    var description = ui.Label({
+      value: labels[i],
+      style: {margin: '4px'}
+    });
+
+    legend.add(ui.Panel([colorBox, description], ui.Panel.Layout.Flow('horizontal')));
+  }
+
+  map.add(legend);
+}
+
+// Add the legend to the map
+addLegend(Map);
+// Function to extract mean ET for each image in the collection
+var extractMeanET = modisET.map(function(image) {
+  var meanET = image.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: region,
+    scale: 500,
+    maxPixels: 1e9
+  });
+  return image.set('date', image.date().format()).set('meanET', meanET.get('ET'));
+});
+
+// Convert the ImageCollection to a FeatureCollection for charting
+var etTimeSeries = ee.FeatureCollection(extractMeanET.map(function(image) {
+  return ee.Feature(null, {
+    'date': image.get('date'),
+    'meanET': image.get('meanET')
+  });
+}));
+
+// Create a time series chart of ET
+var chart = ui.Chart.feature.byFeature({
+  features: etTimeSeries, 
+  xProperty: 'date', 
+  yProperties: ['meanET']
+})
+  .setChartType('LineChart')
+  .setOptions({
+    title: 'Mean ET Time Series (2020)',
+    vAxis: {title: 'ET (mm/8-day)'},
+    hAxis: {title: 'Date'},
+    lineWidth: 2,
+    pointSize: 4,
+    series: {0: {color: 'green'}}
+  });
+
+// Print the chart to the console
+print(chart);
