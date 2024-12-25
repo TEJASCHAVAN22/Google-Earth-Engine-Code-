@@ -1,0 +1,82 @@
+/// Define the area of interest
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 5);
+//-----------------------------------------------------------------------
+// Set study period
+var startyear = 2019; 
+var endyear = 2023;
+var startmonth = 1; 
+var endmonth = 12; 
+
+// Compute beginning & end of study period + sequence of months & years
+var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
+var end_date = ee.Date.fromYMD(endyear , endmonth, 30);
+var years = ee.List.sequence(startyear, endyear);
+var months = ee.List.sequence(startmonth, endmonth);
+//-------------------------------------------------------------------
+// Load monthly precipitation and PET datasets (e.g., CHIRPS for precipitation and TerraClimate for PET).
+var precip = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+                                  .filterDate(start_date, end_date)
+                                  .select('precipitation');
+var pet = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE")
+                                  .filterDate(start_date, end_date)
+                                  .select('pet');
+
+print ('precip', precip)
+print ('pet', pet)
+//----------------------------------------------------------------
+// Function to calculate monthly sum for each month
+var calculateMonthlySum = function(imageCollection, bandName) {
+  return ee.ImageCollection(
+    ee.List.sequence(1, 12).map(function(month) {
+      var monthly = imageCollection
+        .filter(ee.Filter.calendarRange(month, month, 'month'))
+        .sum()
+        .set('month', month);
+      return monthly.rename(bandName + '_monthly');
+    })
+  );
+};
+
+// Calculate monthly precipitation and PET sums
+var precipMonthly = calculateMonthlySum(precip, 'precipitation');
+var petMonthly = calculateMonthlySum(pet, 'pet');
+//------------------------------------------------------------------
+
+// Calculate monthly water balance (D = P - PET)
+var waterBalance = precipMonthly.map(function(image) {
+  var month = image.get('month');
+  var petImage = petMonthly.filter(ee.Filter.eq('month', month)).first();
+  return image.subtract(petImage).rename('water_balance').set('month', month);
+});
+
+//--------------------------------------------------------------------------
+// Placeholder function for standardization (normally fitting to a distribution is needed)
+// Here we assume a simpler normalization for demonstration purposes.
+var standardize = function(image) {
+  var mean = ee.Image(waterBalance.reduce(ee.Reducer.mean()));
+  var stdDev = ee.Image(waterBalance.reduce(ee.Reducer.stdDev()));
+  return image.subtract(mean).divide(stdDev).rename('SPEI');
+};
+
+// Apply the standardization function
+var speiCollection = waterBalance.map(standardize);
+print ('speiCollection' , speiCollection) 
+
+//----------------------------------------------------------------------
+// Filter the collection to the first three months of the year
+var SPEI_Months = speiCollection.filter(ee.Filter.calendarRange(1, 3, 'month'));
+//print('Filtered SPEI Collection (Jan-Mar)',  SPEI_Months);
+
+// Visualize SPEI for January
+Map.addLayer(speiCollection,{min: -2, max: 2, palette: ['red', 'yellow', 'green']}, 'SPEI');
+
+// Export the mean soil moisture image to Google Drive
+Export.image.toDrive({
+  image: SPEI_Months.mean().clip(aoi),
+  description: 'SPEI',
+  scale: 250,
+  region: aoi,
+  maxPixels: 8e13,
+  fileFormat: 'GeoTIFF'
+});
