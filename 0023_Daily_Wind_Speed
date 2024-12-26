@@ -1,0 +1,64 @@
+// Define Region of Interest (ROI)
+var roi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+
+// Function to calculate wind speed from u and v components
+function calculateWindSpeed(img) {
+  var windSpeed = img.expression('sqrt((u**2) + (v**2))', {
+    'u': img.select('u_.*'), 
+    'v': img.select('v_.*')
+  }).rename('wind_speed');
+  return windSpeed.copyProperties(img, img.propertyNames());
+}
+
+// Load ECMWF ERA5 Daily Dataset (2010–2024) and calculate wind speed
+var era5 = ee.ImageCollection("ECMWF/ERA5/DAILY")
+  .select('u_.*', 'v_.*')
+  .filterDate('2010', '2024');
+
+var windspeedCurrent = era5.map(calculateWindSpeed);
+
+// Display time series chart for wind speed (2010–2024)
+print(ui.Chart.image.series({
+  imageCollection: windspeedCurrent,
+  region: roi,
+  reducer: ee.Reducer.mean(),
+  scale: 27000,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'Wind Speed Time Series (2010–2024)',
+  vAxis: { title: 'Wind Speed (m/s)' },
+  hAxis: { title: 'Date' }
+}));
+
+// Load ECMWF ERA5 Daily Dataset (1980–2020) for historical wind speed calculation
+var wind40 = ee.ImageCollection("ECMWF/ERA5/DAILY")
+  .select('u_.*', 'v_.*')
+  .filterDate('1980', '2020');
+
+var windspeedHistorical = wind40.map(calculateWindSpeed);
+
+// Function to extract wind speed and date values
+function extractValues(image) {
+  var date = ee.Date(image.get('system:time_start')).format('YYYY-MM-dd');
+  var value = ee.Number(image.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: roi,
+    scale: 27000
+  }).get('wind_speed'));
+  return ee.Feature(null, {
+    'date': date,
+    'windspeed': value
+  });
+}
+
+// Convert historical wind speed data into a FeatureCollection for export
+var windFeatureCollection = ee.FeatureCollection(
+  windspeedHistorical.map(extractValues)
+);
+
+// Export historical wind speed data (1980–2020) to a CSV file
+Export.table.toDrive({
+  collection: windFeatureCollection,
+  description: 'windspeed40',
+  fileFormat: 'CSV'
+});
