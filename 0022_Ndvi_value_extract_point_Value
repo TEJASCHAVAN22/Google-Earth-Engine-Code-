@@ -1,0 +1,39 @@
+
+// Load the CSV file
+var csvData = ee.FeatureCollection('users/tejaskchavan22/trial_All_code');
+
+// Define a function to extract vegetation index for each point 
+var addVegetationIndex = function(feature) {
+  var yearString = ee.String(feature.get('Year'));
+  var yearMinusOne = ee.String(ee.Number.parse(yearString).subtract(1));
+  
+  var start = ee.Date(yearMinusOne.cat('-01-01'));
+  var end = ee.Date(yearString.cat('-12-31'));
+  
+  var point = ee.Geometry.Point([feature.get('longitude'), feature.get('Latitude')]);
+  
+  var vegetationIndexCollection = ee.ImageCollection('MODIS/006/MOD13Q1')
+                      .filterDate(start, end)
+                      .select('NDVI');
+  
+  var featureWithVegetationIndex = vegetationIndexCollection.map(function(image){
+    var vegetationIndexValue = image.reduceRegion({
+      reducer: ee.Reducer.first(),
+      geometry: point,
+      scale: 250
+    }).get('NDVI');
+    return feature.set('NDVI', vegetationIndexValue);
+  });
+  
+  return featureWithVegetationIndex;
+};
+
+// Map over the CSV data and add vegetation index values
+var VegetationIndexData = csvData.map(addVegetationIndex);
+
+// Export the final data as CSV
+Export.table.toDrive({
+  collection: VegetationIndexData.flatten(),
+  description: 'SHC_VegetationIndex_Kharif_RI',
+  fileFormat: 'CSV'
+});
