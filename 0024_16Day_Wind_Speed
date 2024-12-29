@@ -1,0 +1,71 @@
+// Load the ROI from an asset
+var ROI = ee.FeatureCollection('projects/gee-trial2/assets/IND_Shapefiles/IND');
+Map.addLayer(ROI, { color: 'red' }, 'ROI');
+Map.centerObject(ROI, 4.4); 
+
+// Load the ECMWF ERA5-LAND Daily Aggregates dataset
+var Data = ee.ImageCollection('ECMWF/ERA5_LAND/DAILY_AGGR')
+                              .filterBounds(ROI)
+                              .select('u_component_of_wind_10m') // Select the desired band
+                              .filterDate('2020-01-01', '2020-12-31'); // Filter for the year 2020
+                              
+
+// Check if the dataset is loaded
+print("Dataset preview:", Data.limit(5));
+
+// Define a function to get a list of 16-day intervals for a given year
+function get16DayIntervals(year) {
+  var startDate = ee.Date.fromYMD(year, 1, 1);
+  var endDate = ee.Date.fromYMD(year, 12, 31);
+  var diffDays = endDate.difference(startDate, 'days').add(1); // Add 1 to include endDate
+  var intervals = ee.List.sequence(0, diffDays.subtract(1), 16);
+  return intervals.map(function(dayOffset) {
+    var start = startDate.advance(dayOffset, 'day');
+    var end = start.advance(15, 'day'); // 16-day interval
+    return ee.Dictionary({
+      start: start,
+      end: end
+    });
+  });
+}
+
+// Get the list of 16-day intervals for 2020
+var intervals = get16DayIntervals(2020);
+
+// Summarize data for each 16-day interval
+var intervalData = ee.ImageCollection(
+  intervals.map(function(interval) {
+    interval = ee.Dictionary(interval);
+    var start = ee.Date(interval.get('start'));
+    var end = ee.Date(interval.get('end'));
+    var sumImage = Data.filterDate(start, end)
+      .sum()
+      .set('system:time_start', start.millis())
+      .set('start_date', start.format('YYYY-MM-dd'))
+      .set('end_date', end.format('YYYY-MM-dd'));
+    return sumImage;
+  })
+);
+
+// Check the interval-based dataset
+print("16-Day Interval Data preview:", intervalData.limit(5));
+
+// Create a time series chart
+var chart = ui.Chart.image.series({
+  imageCollection: intervalData,
+  region: ROI.geometry(),
+  reducer: ee.Reducer.mean(),
+  scale: 10000
+})
+.setOptions({
+  title: '16-Day ERA5 u_component_of_wind_10m Data (2020)',
+  vAxis: { title: 'Wind Speed (m/s)' },
+  hAxis: { title: 'Date' },
+  lineWidth: 2,
+  pointSize: 4,
+  series: {
+    0: { color: 'blue' }
+  }
+});
+
+print(chart);
