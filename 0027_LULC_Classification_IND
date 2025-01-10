@@ -1,0 +1,113 @@
+var wc = ee.ImageCollection("ESA/WorldCover/v200");
+var IndusBasin = ee.FeatureCollection("projects/gee-trial2/assets/IND_Shapefiles/IND")
+
+// Get the first image from the collection
+var lulc = wc.first();
+var clippedLulc = lulc.clip(IndusBasin);
+Map.addLayer(clippedLulc, {}, "Clipped LULC");
+
+// Add the Indus Basin boundary as a blue outline with no fill
+Map.addLayer(IndusBasin.style({
+  color: 'blue',
+  fillColor: '00000000', // Transparent fill
+  width: 0.5
+}), {}, "Indus Basin Boundary");
+
+// Add the title to the map
+var title = ui.Label('LAND USE LAND COVER ANALYSIS OF INDIA', {
+  fontSize: '18px',
+  fontWeight: 'bold',
+  padding: '8px',
+  backgroundColor: 'white',
+  textAlign: 'center',
+  stretch: 'horizontal'
+});
+Map.add(title);
+
+// Add attribution in the bottom-right corner
+var attribution = ui.Panel({
+  widgets: [
+    ui.Label('Prepared by:', { fontWeight: 'bold', fontSize: '12px' }),
+    ui.Label('Tejas Chavan', { fontSize: '12px' }),
+
+  ],
+  style: {
+    position: 'bottom-right',
+    backgroundColor: 'white',
+    padding: '8px',
+    textAlign: 'center'
+  }
+});
+Map.add(attribution);
+
+// Add a north arrow to the top-right
+var northArrow = ui.Label({
+  value: '↑',
+  style: {
+    position: 'top-right',
+    fontSize: '24px',
+    color: 'black',
+    padding: '10px'
+  }
+});
+Map.add(northArrow);
+
+// Get the class names, values, and palette from the dataset
+var classNames = lulc.get('Map_class_names');
+var classValues = lulc.get('Map_class_values');
+var classPalette = lulc.get('Map_class_palette');
+
+// Create a dictionary of class names, values, and colors
+var dict = ee.Dictionary({
+  classNames: classNames,
+  classValues: classValues,
+  classPalette: classPalette
+});
+
+// Create and display the legend
+dict.evaluate(function(obj) {
+  var names = obj.classNames;
+  var values = obj.classValues;
+  var colors = obj.classPalette;
+
+  // Create legend panel
+  var legend = ui.Panel({ style: { position: 'bottom-left', padding: '8px' } });
+  legend.add(ui.Label('Land Cover Classes'));
+
+  for (var i = 0; i < names.length; i++) {
+    var colorBox = ui.Label({
+      style: { 
+        backgroundColor: '#' + colors[i],
+        padding: '8px',
+        margin: '2px',
+        fontSize: '12px'
+      }
+    });
+
+    var classLabel = ui.Label(names[i], {
+      fontSize: '12px',
+      margin: '2px'
+    });
+
+    legend.add(ui.Panel([colorBox, classLabel], ui.Panel.Layout.Flow('horizontal')));
+  }
+
+  // Add Indus Basin Boundary to the legend
+  var indusColorBox = ui.Label({
+    style: { 
+      backgroundColor: 'blue', // Same as outline color
+      padding: '8px',
+      margin: '2px',
+      fontSize: '12px'
+    }
+  });
+
+  var indusLabel = ui.Label('Indus Basin Boundary', {
+    fontSize: '12px',
+    margin: '2px'
+  });
+
+  legend.add(ui.Panel([indusColorBox, indusLabel], ui.Panel.Layout.Flow('horizontal')));
+  Map.add(legend);
+});
+
