@@ -1,0 +1,40 @@
+// Load the AOI (Area of Interest)
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+
+// Check if AOI is properly loaded
+print("AOI:", aoi);
+
+// Define time range
+var startyear = 2022; 
+var endyear = 2022;
+var startmonth = 1; 
+var endmonth = 12;
+
+// Compute beginning & end of the study period
+var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
+var end_date = ee.Date.fromYMD(endyear, endmonth, 31);
+
+// Import Sentinel-2 ImageCollection
+var sentinel2 = ee.ImageCollection("COPERNICUS/S2")
+                  .filterBounds(aoi) // Filter by AOI
+                  .filterDate(start_date, end_date) // Specify time range
+                  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20)) // Filter low-cloud images
+                  .select(['B8', 'B3']) // Select NIR (B8) and Green (B3) bands
+                  .median() // Composite for the year;
+
+// Calculate ND Bourn Ratio
+var ndBournRatio = sentinel2.expression(
+  '(B8 - B3) / (B8 + B3)', {
+    B8: sentinel2.select('B8'), // NIR
+    B3: sentinel2.select('B3')  // Green
+  }
+).rename('ND_Bourn_Ratio');
+
+// Clip ND Bourn Ratio to AOI
+var ndBournRatioClipped = ndBournRatio.clip(aoi);
+
+// Add ND Bourn Ratio to Map with custom visualization
+Map.centerObject(aoi, 9);
+Map.addLayer(ndBournRatioClipped, 
+  {min: -1, max: 1, palette: ['blue', 'white', 'green']}, 
+  'ND Bourn Ratio');
