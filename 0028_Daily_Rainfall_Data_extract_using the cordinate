@@ -1,0 +1,59 @@
+var roi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+                                            
+Map.centerObject(roi);
+
+//--------time-------------------------------------------------------
+var time_start = '2000-01-01';
+var time_end = '2023-12-31';
+
+//-----------ee.imageCollection------------------------------------------
+var chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+                           .select('precipitation')
+                           .filterDate(time_start, time_end);
+
+//----------------------------------------------------
+function temporal_collection(collection, start, count, interval, unit) {
+  var seq = ee.List.sequence(0, ee.Number(count).subtract(1));
+  var origin_date = ee.Date(start);
+  return ee.ImageCollection(seq.map(function(i){
+    var start_date = origin_date.advance(ee.Number(interval).multiply(i), unit);
+    var end_date = start_date.advance(1, 'day');  // Advance by 1 day for daily values
+    return collection.filterDate(start_date, end_date).sum()  // Sum for daily rainfall
+      .set('system:time_start', start_date.millis())
+      .set('system:time_end', end_date.millis());
+  }));
+}
+
+// Adjust count to number of days from 2000 to 2023
+var totalDays = ee.Date(time_end).difference(ee.Date(time_start), 'day').round();
+var daily = temporal_collection(chirps, time_start, totalDays, 1, 'day');
+
+//------------------------------------------------------------
+// Load the CSV as a FeatureCollection
+var points = ee.FeatureCollection('projects/gee-trial2/assets/test_data')
+    .map(function(feature) {
+    var lat = feature.get('Latitude');
+    var lon = feature.get('Longitude');
+    var point = ee.Geometry.Point([lon, lat]);
+    return feature.setGeometry(point);
+  });
+
+// Function to extract values from each image in the collection at specified points
+function extractValues(imageCollection, points) {
+  return imageCollection.map(function(image) {
+    return image.sampleRegions({
+      collection: points,
+      geometries: true // Retain geometry for latitude/longitude extraction
+    });
+  });
+}
+
+// Extract values
+var extracted_1 = extractValues(daily, points); // Adjust scale if needed
+
+// Export results without adding latitude/longitude columns twice
+Export.table.toDrive({
+  collection: extracted_1.flatten(),  // Flatten the result to get a proper feature collection
+  description: 'Rainfall',
+  fileFormat: 'CSV'
+});
