@@ -1,0 +1,71 @@
+// Define coordinates and region of interest (ROI)
+var roi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(roi);
+Map.addLayer(roi, {}, 'ROI');
+
+var time_start = '2000-01-01';
+var time_end = '2023-12-31';
+
+//------------------------------------------------------------------------------
+
+// Load MODIS Land Cover data and visualize
+var landcover = ee.ImageCollection("MODIS/061/MCD12Q1")
+                                          .mode()
+                                          .select('LC_Type1');
+
+var visParams = {
+  min: 1.0,
+  max: 17.0,
+  palette: [
+    '05450a', '086a10', '54a708', '78d203', '009900', 'c6b044', 'dcd159',
+    'dade48', 'fbff13', 'b6ff05', '27ff87', 'c24f44', 'a5a5a5', 'ff6d4c',
+    '69fff8', 'f9ffa4', '1c0dff'
+  ],
+};
+
+Map.addLayer(landcover.clip(roi), visParams, 'Land Cover');
+
+//-------------------------------------------------------------------------------------
+
+// Calculate median NDVI for 2020-2021
+var ndvi = ee.ImageCollection("MODIS/061/MOD13Q1")
+                                  .select('NDVI')
+                                  .filterDate(time_start, time_end)
+                                  .median()
+                                  .multiply(0.0001);
+Map.addLayer(ndvi.clip(roi), {min: 0, max: 1, palette: ['white', 'green']}, 'NDVI');
+
+// Combine NDVI and Land Cover, and calculate zonal statistics
+var ndviDataset = ee.Image.cat([ndvi, landcover]);
+var ndviZonalStats = ndviDataset.reduceRegion({
+  reducer: ee.Reducer.minMax()
+            .combine(ee.Reducer.mean(), null, true)
+            .group(1, 'Landcover'),
+  geometry: roi,
+  scale: 250
+});
+print('NDVI Zonal Statistics', ndviZonalStats);
+
+//----------------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------------
+
+// Calculate median LST for 2020-2021
+var lst = ee.ImageCollection("MODIS/061/MOD11A2")
+                             .select('LST_Day_1km')
+                             .filterDate(time_start, time_end)
+                             .median()
+                             .multiply(0.02)
+                             .subtract(273.15);
+                              
+Map.addLayer(lst.clip(roi), {min: 10, max: 50, palette: ['blue', 'yellow', 'red']}, 'LST');
+
+// Combine LST and Land Cover, and calculate zonal statistics
+var lstDataset = ee.Image.cat([lst, landcover]);
+var lstZonalStats = lstDataset.reduceRegion({
+  reducer: ee.Reducer.minMax()
+            .combine(ee.Reducer.mean(), null, true)
+            .group(1, 'Landcover'),
+  geometry: roi,
+  scale: 250
+});
+print('LST Zonal Statistics', lstZonalStats);
