@@ -1,0 +1,43 @@
+// Load India's boundaries from Google Earth Engine
+var india = ee.FeatureCollection("projects/gee-trial2/assets/IND_Shapefiles/IND");
+             
+// Load VIIRS Night Lights data for India from 2023
+var viirs = ee.ImageCollection("NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG")
+              .filterDate("2023-01-01", "2023-12-31") // Data for 2023
+              .median() // Temporal median of the data
+              .select("avg_rad") // Select the main illumination band
+              .clip(india); // Clip to India's boundaries
+
+// Visualization settings for VIIRS Night Lights
+var viirsVis = {
+  min: 0.0,
+  max: 60.0,
+  palette: ['black', 'red', 'yellow', 'white']
+};
+
+// Load Landsat 8 data for India to display satellite imagery
+var landsat = ee.ImageCollection("LANDSAT/LC08/C02/T1_TOA")
+               .filterBounds(india)
+               .filterDate("2023-01-01", "2023-12-31")
+               .median()
+               .clip(india);
+
+// Visualization settings for Landsat 8 (False Color)
+var landsatVis = {
+  bands: ["B5", "B4", "B3"], // Near-infrared, Red, Green bands
+  min: 0,
+  max: 0.3,
+  gamma: 1.3
+};
+
+// Center the map on India
+Map.centerObject(india, 5);
+
+// Add Landsat 8 layer
+Map.addLayer(landsat, landsatVis, "Landsat 8 False Color");
+
+// Add VIIRS Night Lights layer
+Map.addLayer(viirs, viirsVis, "VIIRS Night Lights 2023");
+
+// Add India's boundaries in red
+Map.addLayer(india.style({color: "red", width: 2}), {}, "India Borders");
