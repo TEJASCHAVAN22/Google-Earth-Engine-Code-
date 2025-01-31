@@ -1,0 +1,162 @@
+var AOI =  ee.Geometry.Polygon(
+           [[[73.25239279892702, 18.996516438707232],
+          [73.25239279892702, 18.340798678262793],
+          [74.0969667735364, 18.340798678262793],
+          [74.0969667735364, 18.996516438707232]]], null, false);
+          
+Map.centerObject(AOI, 10);
+
+//-------------------------------------------------------
+// 0. time and date
+//--------------------------------------------------------
+var time_start = '2000-01-01';
+var time_end = '2023-12-31';
+
+// ----------------------------------------------
+// 1. TERRAIN SLOPE ANALYSIS (Using DEM)
+// ----------------------------------------------
+var dem = ee.Image("USGS/SRTMGL1_003").clip(AOI);
+var slope = ee.Terrain.slope(dem).rename('Slope');
+
+// ----------------------------------------------
+// 2. VEGETATION COVER ANALYSIS (NDVI)
+// ----------------------------------------------
+var s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+                                    .filterBounds(AOI)
+                                    .filterDate(time_start, time_end)
+                                    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10))
+                                    .select(['B8', 'B4'])
+                                    .median()
+                                    .clip(AOI);
+                                    
+var ndvi = s2.normalizedDifference(['B8', 'B4']).rename('NDVI');
+
+// ----------------------------------------------
+// 3. SOIL MOISTURE (Radar-Based - Sentinel-1)
+// ----------------------------------------------
+var sentinel1 = ee.ImageCollection("COPERNICUS/S1_GRD")
+                                     .filterBounds(AOI)
+                                     .filterDate(time_start, time_end)
+                                     .filter(ee.Filter.eq('instrumentMode', 'IW'))
+                                     .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+                                     .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+                                     .filter(ee.Filter.eq('orbitProperties_pass', 'DESCENDING'))
+                                     .select(['VV', 'VH'])
+                                     .median()
+                                     .clip(AOI);
+                                     
+var soilMoisture = sentinel1.expression(
+  '(VH - VV) / (VH + VV)', {
+    'VH': sentinel1.select('VH'),
+    'VV': sentinel1.select('VV')
+  }).rename('SoilMoisture');
+
+// ----------------------------------------------
+// 4. PRECIPITATION (Rainfall from CHIRPS)
+// ----------------------------------------------
+var precipitation = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+                                          .filterBounds(AOI)
+                                          .filterDate(time_start, time_end)
+                                          .sum()
+                                          .rename('Precipitation')
+                                          .clip(AOI);
+
+// ----------------------------------------------
+// 5. LANDSLIDE SUSCEPTIBILITY MAPPING
+// ----------------------------------------------
+
+// Normalize values
+var normSlope = slope.divide(60);
+var normNDVI = ndvi.multiply(-1).add(1);
+var normSoilMoisture = soilMoisture.add(1).divide(2);
+var normPrecipitation = precipitation.divide(3000);
+
+// Compute landslide risk index
+var landslideRisk = normSlope.multiply(0.4)
+  .add(normNDVI.multiply(0.2))
+  .add(normSoilMoisture.multiply(0.2))
+  .add(normPrecipitation.multiply(0.2))
+  .rename('LandslideRisk');
+
+// ----------------------------------------------
+// 6. VISUALIZATION PARAMETERS
+// ----------------------------------------------
+var landslideVis = { min: 0, max: 1, palette: ['green', 'yellow', 'red'] };
+
+// Add Title
+var title = ui.Label({
+  value: "Landslide Susceptibility Analysis",
+  style: { fontSize: '20px', fontWeight: 'bold', margin: '10px' }
+});
+Map.add(title);
+
+// Add Landslide Risk Map
+Map.addLayer(landslideRisk, landslideVis, 'Landslide Risk');
+
+// ----------------------------------------------
+// 7. LEGEND FOR MAP
+// ----------------------------------------------
+var legend = ui.Panel({
+  style: {
+    position: 'bottom-left',
+    padding: '8px',
+    backgroundColor: 'white'
+  }
+});
+legend.add(ui.Label('Landslide Risk Map', { fontWeight: 'bold' }));
+
+// Legend Colors and Labels
+var colors = ['green', 'yellow', 'red'];
+var labels = ['Low Risk', 'Moderate Risk', 'High Risk'];
+
+for (var i = 0; i < colors.length; i++) {
+  var colorBox = ui.Label({
+    style: {
+      backgroundColor: colors[i],
+      width: '30px',
+      height: '30px',
+      margin: '5px'
+    }
+  });
+  var label = ui.Label(labels[i], { margin: '4px 6px' });
+  legend.add(ui.Panel([colorBox, label], ui.Panel.Layout.Flow('horizontal')));
+}
+
+Map.add(legend);
+
+// ----------------------------------------------
+// 8. EXPORT RESULTS
+// ----------------------------------------------
+Export.image.toDrive({
+  image: landslideRisk,
+  description: 'Landslide_Susceptibility_AOI',
+  scale: 30,
+  region: AOI,
+  fileFormat: 'GeoTIFF',
+  maxPixels: 1e13
+});
+
+// ----------------------------------------------
+// 9. CHARTS FOR STATISTICAL ANALYSIS
+// ----------------------------------------------
+var landslideStats = ee.FeatureCollection([
+  ee.Feature(null, { 'Factor': 'Slope', 'Value': normSlope.reduceRegion({
+    reducer: ee.Reducer.mean(), geometry: AOI, scale: 500, maxPixels: 1e13 }).get('Slope') }),
+  ee.Feature(null, { 'Factor': 'Vegetation', 'Value': normNDVI.reduceRegion({
+    reducer: ee.Reducer.mean(), geometry: AOI, scale: 500, maxPixels: 1e13 }).get('NDVI') }),
+  ee.Feature(null, { 'Factor': 'Soil Moisture', 'Value': normSoilMoisture.reduceRegion({
+    reducer: ee.Reducer.mean(), geometry: AOI, scale: 500, maxPixels: 1e13 }).get('SoilMoisture') }),
+  ee.Feature(null, { 'Factor': 'Precipitation', 'Value': normPrecipitation.reduceRegion({
+    reducer: ee.Reducer.mean(), geometry: AOI, scale: 500, maxPixels: 1e13 }).get('Precipitation') })
+]);
+
+var chart = ui.Chart.feature.byFeature(landslideStats, 'Factor', 'Value')
+  .setChartType('ColumnChart')
+  .setOptions({
+    title: 'Landslide Risk Factors',
+    hAxis: { title: 'Factor' },
+    vAxis: { title: 'Normalized Value' },
+    series: { 0: { color: 'red' } }
+  });
+
+print(chart);
