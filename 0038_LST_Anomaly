@@ -1,0 +1,87 @@
+// Load the study region (India bounding box)
+var india = ee.Geometry.Polygon(
+          [[[74.65873463280559, 25.14308151593941],
+          [74.65873463280559, 20.938646691345017],
+          [79.49271900780559, 20.938646691345017],
+          [79.49271900780559, 25.14308151593941]]]);
+
+// Visualize the ROI on the map
+Map.centerObject(india, 5);
+Map.addLayer(india, {color: 'blue'}, 'India');
+
+// Time period for analysis
+var time_start = '2000-01-01'; 
+var time_end = '2020-12-31';
+
+// Load MODIS LST dataset (8-day composite)
+var lstCollection = ee.ImageCollection("MODIS/061/MOD11A2")
+                      .filterDate(time_start, time_end)
+                      .select("LST_Day_1km")  // Daytime LST band
+                      .map(function(image) {
+                          return image.multiply(0.02).subtract(273.15)  // Convert to Celsius
+                                      .set('system:time_start', image.get('system:time_start'));
+                      });
+
+// Function to aggregate LST over custom temporal intervals (monthly)
+function temporal_collection(collection, start, count, interval, unit) {
+  var seq = ee.List.sequence(0, ee.Number(count).subtract(1));
+  var origin_date = ee.Date(start);
+  return ee.ImageCollection(seq.map(function(i) {
+    var start_date = origin_date.advance(ee.Number(interval).multiply(i), unit);
+    var end_date = origin_date.advance(ee.Number(interval).multiply(ee.Number(i).add(1)), unit);
+    return collection.filterDate(start_date, end_date).mean()
+      .set('system:time_start', start_date.millis())
+      .set('system:time_end', end_date.millis());
+  }));
+}
+
+// Create a monthly LST collection
+var monthlyLST = temporal_collection(lstCollection, time_start, 300, 1, 'month');
+
+// Calculate mean LST over the entire time period
+var lstMean = monthlyLST.mean();
+
+// Display mean LST on the map
+Map.addLayer(lstMean.clip(india), {min: 15, max: 45, palette: ['blue', 'white', 'red']}, 'Mean LST (2000-2024)');
+
+// Calculate LST anomalies
+var lstAnomaly = monthlyLST.map(function(img) {
+  return img.subtract(lstMean)
+    .copyProperties(img, img.propertyNames());
+});
+
+// Plot time series of LST anomalies
+print(
+  ui.Chart.image.series(lstAnomaly, india, ee.Reducer.mean(), 5000, 'system:time_start')
+    .setChartType('LineChart')
+    .setOptions({title: 'Monthly LST Anomaly in India (2000-2024)', vAxis: {title: 'Anomaly (°C)'}})
+);
+
+// Visualize anomalies for 2010-2011
+var lstAnomaly2010 = lstAnomaly.filterDate('2010-01-01', '2011-12-31').toBands();
+
+// Get band names
+var bandNames = lstAnomaly2010.bandNames();
+
+// Visualization parameters for anomaly
+var visParams = {
+  min: -5,  
+  max: 5,  
+  palette: ['blue', 'white', 'red']  
+};
+
+// Compute Final Anomaly Layer (Mean of All Anomaly Bands)
+var finalLSTAnomaly = lstAnomaly2010.reduce(ee.Reducer.mean());
+
+// Add final anomaly visualization
+Map.addLayer(finalLSTAnomaly.clip(india), visParams, 'Final LST Anomaly (2010-2011)');
+
+// Export anomalies for 2010-2011 to Google Drive
+Export.image.toDrive({
+  image: finalLSTAnomaly.clip(india).float(),
+  description: 'India_LST_Final_Anomaly_2010_2011',
+  scale: 1000,
+  region: india,
+  folder: 'LST_Anomalies',
+  crs: 'EPSG:4326',
+});
