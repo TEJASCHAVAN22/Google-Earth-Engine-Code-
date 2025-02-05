@@ -1,0 +1,63 @@
+// Load FAO dataset and filter for India
+var india = ee.FeatureCollection("projects/gee-trial2/assets/Shapfile/WMH_Distric");
+
+// Visualize the ROI on the map
+Map.centerObject(india, 5);
+Map.addLayer(india, {color: 'blue'}, 'India');
+
+// Time period for analysis
+var time_start = '2000-01-01'; 
+var time_end = '2020-12-31';
+
+// Load CHIRPS daily precipitation data
+var chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+                                  .filterDate(time_start, time_end);
+
+// Function to aggregate data over custom temporal intervals
+function temporal_collection(collection, start, count, interval, unit) {
+  var seq = ee.List.sequence(0, ee.Number(count).subtract(1));
+  var origin_date = ee.Date(start);
+  return ee.ImageCollection(seq.map(function(i) {
+    var start_date = origin_date.advance(ee.Number(interval).multiply(i), unit);
+    var end_date = origin_date.advance(ee.Number(interval).multiply(ee.Number(i).add(1)), unit);
+    return collection.filterDate(start_date, end_date).sum()
+      .set('system:time_start', start_date.millis())
+      .set('system:time_end', end_date.millis());
+  }));
+}
+
+// Create a monthly precipitation collection
+var monthly = temporal_collection(chirps, time_start, 240, 1, 'month');
+
+// Calculate mean precipitation over the entire time period
+var pr_mean = monthly.mean();
+
+// Display mean precipitation on the map
+Map.addLayer(pr_mean.clip(india), {min: 0, max: 200, palette: ['white', 'blue']}, 'Mean Precipitation');
+
+// Calculate precipitation anomalies
+var anomaly = monthly.map(function(img) {
+  return img.subtract(pr_mean)
+    .copyProperties(img, img.propertyNames());
+});
+
+// Plot time series of precipitation anomalies
+print(
+  ui.Chart.image.series(anomaly, india, ee.Reducer.mean(), 5000, 'system:time_start')
+    .setChartType('ColumnChart')
+    .setOptions({title: 'Monthly Precipitation Anomaly in India (2000-2020)', vAxis: {title: 'Anomaly (mm)'}})
+);
+
+// Visualize anomalies for 2010-2011
+var anomaly2010 = anomaly.filterDate('2010-01-01', '2011-12-31').toBands();
+Map.addLayer(anomaly2010.clip(india), {}, 'Anomaly 2010-2011');
+
+// Export anomalies for 2010-2011 to Google Drive
+Export.image.toDrive({
+  image: anomaly2010.clip(india).float(),
+  description: 'India_Precipitation_Anomaly_2010_2011',
+  scale: 5000,
+  region: india.geometry(),
+  folder: 'precipitation',
+  crs: 'EPSG:4326',
+});
