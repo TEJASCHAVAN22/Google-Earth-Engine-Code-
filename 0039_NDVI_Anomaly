@@ -1,0 +1,84 @@
+// Load study area (India bounding box)
+var india = ee.Geometry.Polygon(
+          [[[74.65873463280559, 25.14308151593941],
+          [74.65873463280559, 20.938646691345017],
+          [79.49271900780559, 20.938646691345017],
+          [79.49271900780559, 25.14308151593941]]]);
+
+// Visualize the ROI on the map
+Map.centerObject(india, 5);
+Map.addLayer(india, {color: 'blue'}, 'India');
+
+// Time period for analysis
+var time_start = '2000-01-01'; 
+var time_end = '2024-12-31';
+
+// Load MODIS NDVI dataset
+var ndviCollection = ee.ImageCollection("MODIS/061/MOD13A2")
+                      .filterDate(time_start, time_end)
+                      .select("NDVI")
+                      .map(function(image) {
+                          return image.multiply(0.0001) // Scale factor
+                                      .set('system:time_start', image.get('system:time_start'));
+                      });
+
+// Function to aggregate NDVI over custom temporal intervals (monthly)
+function temporal_collection(collection, start, count, interval, unit) {
+  var seq = ee.List.sequence(0, ee.Number(count).subtract(1));
+  var origin_date = ee.Date(start);
+  return ee.ImageCollection(seq.map(function(i) {
+    var start_date = origin_date.advance(ee.Number(interval).multiply(i), unit);
+    var end_date = origin_date.advance(ee.Number(interval).multiply(ee.Number(i).add(1)), unit);
+    return collection.filterDate(start_date, end_date).mean()
+      .set('system:time_start', start_date.millis())
+      .set('system:time_end', end_date.millis());
+  }));
+}
+
+// Create a monthly NDVI collection
+var monthlyNDVI = temporal_collection(ndviCollection, time_start, 300, 1, 'month');
+
+// Calculate mean NDVI over the entire time period
+var ndviMean = monthlyNDVI.mean();
+
+// Display mean NDVI on the map
+Map.addLayer(ndviMean.clip(india), {min: 0, max: 1, palette: ['red', 'yellow', 'green']}, 'Mean NDVI (2000-2024)');
+
+// Calculate NDVI anomalies
+var ndviAnomaly = monthlyNDVI.map(function(img) {
+  return img.subtract(ndviMean)
+    .copyProperties(img, img.propertyNames());
+});
+
+// Plot time series of NDVI anomalies
+print(
+  ui.Chart.image.series(ndviAnomaly, india, ee.Reducer.mean(), 5000, 'system:time_start')
+    .setChartType('LineChart')
+    .setOptions({title: 'Monthly NDVI Anomaly in India (2000-2024)', vAxis: {title: 'Anomaly'}})
+);
+
+// Visualize anomalies for 2010-2011
+var ndviAnomaly2010 = ndviAnomaly.filterDate('2010-01-01', '2011-12-31').toBands();
+
+// Compute Final NDVI Anomaly Layer (Mean of All Anomaly Bands)
+var finalNDVIAnomaly = ndviAnomaly2010.reduce(ee.Reducer.mean());
+
+// Visualization parameters
+var visParams = {
+  min: -0.2,  
+  max: 0.2,  
+  palette: ['red', 'white', 'green']  
+};
+
+// Add final NDVI anomaly visualization
+Map.addLayer(finalNDVIAnomaly.clip(india), visParams, 'Final NDVI Anomaly (2010-2011)');
+
+// Export anomalies for 2010-2011 to Google Drive
+Export.image.toDrive({
+  image: finalNDVIAnomaly.clip(india).float(),
+  description: 'India_NDVI_Final_Anomaly_2010_2011',
+  scale: 5000,
+  region: india,
+  folder: 'NDVI_Anomalies',
+  crs: 'EPSG:4326',
+});
