@@ -1,0 +1,72 @@
+
+// Cloud Mask Function
+var maskClouds = function(image) {
+  var cloudProbability = image.select('MSK_CLDPRB'); // Select the cloud probability band
+  return image.updateMask(cloudProbability.lt(10)); // Return image masking out cloudy areas (cloud probability < 50%)
+};
+
+var scale = (function(image) {
+                    return image
+                      .multiply(0.0001) // Scaling factor for Sentinel-2 SR
+                      .copyProperties(image, ['system:time_start']);
+                  });
+//----------------------------------------------------------------------------------------------------
+
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 5); 
+
+//-----------------------------------------------------------------------------
+var startyear = 2019; 
+var endyear = 2019;
+var startmonth = 1; 
+var endmonth = 12; 
+
+// Compute beginning & end of study period + sequence of months & years
+var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
+var end_date = ee.Date.fromYMD(endyear , endmonth, 30);
+var years = ee.List.sequence(startyear, endyear);
+var months = ee.List.sequence(startmonth,endmonth);
+
+// Load the Santianal Dataset
+var santianal = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+                                    .filterBounds(aoi)
+                                    .map(maskClouds)
+                                    .map(scale)
+                                    .filterDate(start_date, end_date);
+
+//---------------------------------------------------------------------------------------//
+// Soil Adjusted Vegetataion Index (SAVI)
+//---------------------------------------------------------------------------------------//
+var savi = function(image) {
+  var red = image.select('B4');  // Red band (660-680 nm)
+  var nir = image.select('B8');  // Near-infrared band (780-1400 nm)
+  var L = 0.5;  // Soil line parameter
+  return ((ee.Image(1).add(L)).multiply(nir.subtract(red))).divide(nir.add(red).add(L));
+};
+var saviCollection = santianal.map(savi);
+
+//---------------------------------------------------------------------------------------
+
+var Vis = {
+  min: -1,
+  max: 1,
+  palette: ['0000ff','00ffff','ffff00','ff0000','ffffff'],
+};
+
+
+Map.addLayer(saviCollection.map(function(image) {
+  return image.clip(aoi);
+}), Vis, 'palette');
+
+//-------------------------------------------------------------------
+// // Export the image collection to Drive
+// Export.image.toDrive({
+//   image: saviCollection.mean().toInt16(),
+//   description: 'SAVI',
+//   scale: 250,
+//   region: aoi,
+//   maxPixels: 8e9,
+//   fileFormat: 'GeoTIFF'
+// });
+
+
