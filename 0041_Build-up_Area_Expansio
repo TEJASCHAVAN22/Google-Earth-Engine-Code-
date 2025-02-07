@@ -1,0 +1,65 @@
+var aoi = ee.Geometry.Polygon([
+  [[73.2524, 18.9965], [73.2524, 18.3408], 
+   [74.0969, 18.3408], [74.0969, 18.9965]]
+]);
+
+Map.centerObject(aoi, 8);
+
+var esri_lulc10 = ee.ImageCollection("projects/sat-io/open-datasets/landcover/ESRI_Global-LULC_10m_TS");
+
+// Function to remap LULC classes
+function remapper(image) {
+  return image.remap([1,2,4,5,7,8,9,10,11], [1,2,3,4,5,6,7,8,9]);
+}
+
+// Function to get Built-up area and calculate total area
+function getBuiltUp(year) {
+  var lulc = esri_lulc10
+    .filterDate(year + '-01-01', year + '-12-31') // Filter by year
+    .map(remapper) // Apply remap while it's an ImageCollection
+    .mosaic() // Convert to a single Image
+    .clip(aoi); // Clip to AOI
+
+  var builtUp = lulc.eq(5).selfMask(); // Keep only Built-up (Class 5)
+
+  // Calculate the total built-up area in square kilometers
+  var pixelArea = builtUp.multiply(ee.Image.pixelArea()); // Area in m²
+  var totalArea = pixelArea.reduceRegion({
+    reducer: ee.Reducer.sum(),
+    geometry: aoi,
+    scale: 10, // 10m resolution
+    maxPixels: 1e13
+  }).getNumber('remapped'); 
+
+  totalArea = totalArea.divide(1e6); // Convert m² to km²
+  print("Built-up Area for " + year + ": ", totalArea, "km²");
+
+  return builtUp;
+}
+
+// Visualization parameters for built-up areas
+var builtUpVis = { palette: ['#ED022A'] }; // Red for Built-up
+
+// Add Built-up layers for different years
+var years = [2017, 2018, 2019, 2020, 2021, 2022, 2023];
+
+years.forEach(function(year) {
+  var builtUpLayer = getBuiltUp(year);
+  Map.addLayer(builtUpLayer, builtUpVis, year + ' Built-up Area ');
+});
+
+// Create legend for Built-up areas
+var legend = ui.Panel({
+  style: { position: 'bottom-left', padding: '8px 15px' }
+});
+
+legend.add(ui.Label('Built-up Area 2023', { fontWeight: 'bold', fontSize: '18px' }));
+legend.add(ui.Panel({
+  widgets: [
+    ui.Label({ style: { backgroundColor: '#ED022A', padding: '8px', margin: '0 0 4px 0' } }),
+    ui.Label({ value: 'Built-up', style: { margin: '0 0 4px 6px' } })
+  ],
+  layout: ui.Panel.Layout.Flow('horizontal')
+}));
+
+Map.add(legend);
