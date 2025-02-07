@@ -1,0 +1,105 @@
+// Define coordinates and Region of Interest (ROI)
+// Load the AOI (Area of Interest)
+var roi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+
+//-------------------------------------------------------------------------------
+// Set Study Period (Start and End Year, Month)
+//-------------------------------------------------------------------------------
+var startyear = 2012; 
+var endyear = 2024;
+var startmonth = 1; 
+var endmonth = 12; 
+
+// Compute beginning & end of study period, sequence of months & years
+var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
+var end_date = ee.Date.fromYMD(endyear , endmonth, 30);
+var years = ee.List.sequence(startyear, endyear);
+var months = ee.List.sequence(startmonth, endmonth);
+
+//-------------------------------------------------------------------------------
+// Load MODIS Terra LST Data and Process LST
+//-------------------------------------------------------------------------------
+var lst = ee.ImageCollection('MODIS/006/MOD11A1')
+            .filterBounds(roi)
+            .filterDate(start_date, end_date)
+            .select('LST_Day_1km');
+
+// Convert LST from Kelvin to Celsius
+var lst_celsius = lst.map(function(image) {
+  return image.subtract(273.15).clip(roi);
+});
+
+// Calculate the mean LST for the entire study period
+var lst_mean = lst_celsius.mean();
+
+// Define Urban and Rural Zones (Modify with Actual Data)
+//-------------------------------------------------------------------------------
+var urban_mask = roi;  // Assuming the ROI is an urban area
+
+// Define rural area manually
+var rural_mask = ee.Geometry.Polygon(
+           [[[73.6924138184258, 18.65149797397508],
+          [73.6924138184258, 18.38454989078295],
+          [74.02337695319143, 18.38454989078295],
+          [74.02337695319143, 18.65149797397508]]]);
+
+// Calculate the average LST for the urban area
+var urban_lst = lst_celsius.mean().clip(urban_mask);
+
+// Calculate the average LST for the rural area
+var rural_lst = lst_celsius.mean().clip(rural_mask);
+
+//-------------------------------------------------------------------------------
+// Calculate Urban Heat Island (UHI)
+//-------------------------------------------------------------------------------
+// UHI = Urban LST - Rural LST
+var uhi = urban_lst.subtract(rural_lst);
+
+// Display UHI results
+Map.addLayer(uhi, {min: -5, max: 10, palette: ['blue', 'green', 'yellow', 'red']}, 'UHI');
+
+//-------------------------------------------------------------------------------
+// Create a Time Series Graph of UHI values
+//-------------------------------------------------------------------------------
+// Create a list of dates (based on the sequence of years and months)
+var dateList = ee.List.sequence(startyear, endyear).map(function(year) {
+  return ee.Date.fromYMD(year, 1, 1);  // Start date of each year
+});
+
+// Create a time series of UHI values by extracting the mean UHI value for each year
+var uhiValues = dateList.map(function(date) {
+  var uhiAtDate = uhi.clip(roi).reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: roi,
+    scale: 1000
+  }).get('LST_Day_1km');
+  return ee.Feature(null, {'date': date, 'uhi': uhiAtDate});
+});
+
+// Convert to FeatureCollection for charting
+var uhiChartData = ee.FeatureCollection(uhiValues);
+
+// Create the graph
+var chart = ui.Chart.feature.byFeature(uhiChartData, 'date', 'uhi')
+                .setChartType('LineChart')
+                .setOptions({
+                  title: 'Urban Heat Island (UHI) Time Series',
+                  vAxis: {title: 'UHI (°C)'},
+                  hAxis: {title: 'Year'},
+                  lineWidth: 2,
+                  pointSize: 5
+                });
+
+// Display the chart
+print(chart);
+
+//-------------------------------------------------------------------------------
+// Export UHI Result (Optional)
+//-------------------------------------------------------------------------------
+Export.image.toDrive({
+  image: uhi,
+  description: 'Urban_Heat_Island',
+  scale: 1000,
+  region: roi,
+  fileFormat: 'GeoTIFF'
+});
