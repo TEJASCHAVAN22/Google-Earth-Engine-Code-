@@ -1,0 +1,145 @@
+// Define the Region of Interest (Replace with actual coordinates)
+var roi = ee.Geometry.Rectangle([75.5, 18.5, 76.5, 19.5]); // Example area
+
+// Load Sentinel-2 Image Collection
+var sentinel = ee.ImageCollection('COPERNICUS/S2_SR')
+                .filterBounds(roi)
+                .filterDate('2023-06-01', '2023-10-01') // Crop growing season
+                .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10)) // Remove cloudy images
+                .median() // Get median composite
+                .clip(roi);
+
+// Select relevant bands for classification
+var bands = ['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B11', 'B12'];
+var image = sentinel.select(bands);
+
+// Load Training Data (Replace with your ground truth data)
+var trainingPoints = ee.FeatureCollection([
+  ee.Feature(ee.Geometry.Point([75.6, 18.6]), {'class': 0}), // Wheat
+  ee.Feature(ee.Geometry.Point([75.7, 18.7]), {'class': 1}), // Sugarcane
+  ee.Feature(ee.Geometry.Point([75.8, 18.8]), {'class': 2}), // Maize
+  ee.Feature(ee.Geometry.Point([75.9, 18.9]), {'class': 3})  // Other Crop
+]);
+
+// Extract training samples
+var training = image.sampleRegions({
+  collection: trainingPoints,
+  properties: ['class'],
+  scale: 10
+});
+
+// Train a Random Forest Classifier
+var classifier = ee.Classifier.smileRandomForest(50).train({
+  features: training,
+  classProperty: 'class',
+  inputProperties: bands
+});
+
+// Classify the Sentinel-2 image
+var classified = image.classify(classifier);
+
+// Define visualization parameters
+var visParams = {
+  min: 0, max: 3,
+  palette: ['yellow', 'green', 'blue', 'red'] // Adjust based on classes
+};
+
+// Add to Map
+Map.centerObject(roi, 9);
+Map.addLayer(classified, visParams, 'Crop Classification');
+
+// Function to add a legend
+function addLegend() {
+  var legend = ui.Panel({
+    style: {
+      position: 'bottom-left',
+      padding: '8px 15px'
+    }
+  });
+
+  var title = ui.Label({
+    value: 'Crop Classification Legend',
+    style: {
+      fontWeight: 'bold',
+      fontSize: '14px',
+      margin: '0 0 4px 0',
+      padding: '0'
+    }
+  });
+
+  var colors = ['yellow', 'green', 'blue', 'red'];
+  var names = ['Wheat', 'Sugarcane', 'Maize', 'Other Crop'];
+
+  var list = ui.Panel({
+    layout: ui.Panel.Layout.flow('vertical')
+  });
+
+  for (var i = 0; i < colors.length; i++) {
+    var colorBox = ui.Label({
+      style: {
+        backgroundColor: colors[i],
+        padding: '8px',
+        margin: '4px'
+      }
+    });
+
+    var description = ui.Label({
+      value: names[i],
+      style: {
+        margin: '4px 0 4px 6px'
+      }
+    });
+
+    var row = ui.Panel({
+      widgets: [colorBox, description],
+      layout: ui.Panel.Layout.flow('horizontal')
+    });
+
+    list.add(row);
+  }
+
+  legend.add(title);
+  legend.add(list);
+  Map.add(legend);
+}
+
+// Call the function to add the legend
+addLegend();
+
+// Calculate the area of each class in square kilometers
+var areaImage = ee.Image.pixelArea().addBands(classified);
+
+// Sum up the area for each class
+var areaStats = areaImage.reduceRegion({
+  reducer: ee.Reducer.sum().group({
+    groupField: 1,
+    groupName: 'class'
+  }),
+  geometry: roi,
+  scale: 10,
+  maxPixels: 1e13
+});
+
+// Convert results to readable format
+var classAreas = ee.List(areaStats.get('groups')).map(function(obj) {
+  obj = ee.Dictionary(obj);
+  return {
+    class: obj.get('class'),
+    area_km2: ee.Number(obj.get('sum')).divide(1e6) // Convert m² to km²
+  };
+});
+
+// Print area covered by each class
+classAreas.evaluate(function(result) {
+  print('Class Area (km²):', result);
+});
+
+// Export the classification result
+Export.image.toDrive({
+  image: classified,
+  description: 'Crop_Classification_Sentinel2',
+  scale: 10,
+  region: roi,
+  fileFormat: 'GeoTIFF',
+  maxPixels: 1e13
+});
