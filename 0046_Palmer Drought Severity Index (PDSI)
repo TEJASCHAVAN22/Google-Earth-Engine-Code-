@@ -1,0 +1,82 @@
+/// Define the area of interest
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 5);
+//-----------------------------------------------------------------------
+// Set study period
+var startyear = 2019; 
+var endyear = 2023;
+var startmonth = 1; 
+var endmonth = 12; 
+
+// Compute beginning & end of study period + sequence of months & years
+var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
+var end_date = ee.Date.fromYMD(endyear , endmonth, 30);
+var years = ee.List.sequence(startyear, endyear);
+var months = ee.List.sequence(startmonth, endmonth);
+
+//-----------------------------------------------------------------------------------
+// Import precipitation and temperature datasets
+var precip = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+                                .filterDate(start_date, end_date);
+                                
+var temp = ee.ImageCollection("ECMWF/ERA5/DAILY")
+                              .select('mean_2m_air_temperature')
+                              .filterDate(start_date, end_date);
+//------------------------------------------------------------------------------
+// Calculate total annual precipitation and mean annual temperature
+var annualPrecip = precip.sum().rename('annual_precipitation');
+var annualTemp = temp.mean().rename('annual_temperature');
+print('Annual Precipitation (mm):', annualPrecip);
+print('Annual Temperature (K):', annualTemp);
+//-----------------------------------------------------------------------
+// Define constants
+var I = 1; // Approximation of heat index, adjust based on monthly data if available
+var a = 0.49;  // Thornthwaite's empirical coefficient for temperate zones, usually calculated as 0.49
+
+// Implement the PET calculation using GEE math functions without using `expression`
+var PET = annualTemp
+            .multiply(10)
+            .divide(I)
+            .pow(a)
+            .multiply(16)
+            .rename('PET');
+
+print('Potential Evapotranspiration (PET):', PET);
+//-------------------------------------------------------------------------------
+// Calculate the Drought Index as a ratio of precipitation to PET
+var droughtIndex = annualPrecip.divide(PET).rename('drought_index');
+print('Drought Index:', droughtIndex);
+
+// // Define visualization parameters for the drought index
+// var droughtVis = {min: 0, max: 3, palette: ['red', 'yellow', 'green']};
+// Map.addLayer(droughtIndex.clip(aoi), droughtVis, 'Drought Index');
+
+var droughtVis = {
+  min: 0,
+  max: 10,
+  palette: [
+    '#8b0000', // Dark Red (0 - 0.5)
+    '#b22222', // Firebrick (0.5 - 1.0)
+    '#ff4500', // OrangeRed (1.0 - 1.5)
+    '#ff8c00', // DarkOrange (1.5 - 2.0)
+    '#ffd700', // Gold (2.0 - 2.5)
+    '#ffff00', // Yellow (2.5 - 3.0)
+    '#adff2f', // GreenYellow (3.0 - 3.5)
+    '#7fff00', // Chartreuse (3.5 - 4.0)
+    '#32cd32', // LimeGreen (4.0 - 4.5)
+    '#006400'  // DarkGreen (4.5 - 5.0)
+  ]
+};
+
+// Add the drought index layer with the 10-color palette visualization
+Map.addLayer(droughtIndex.clip(aoi), droughtVis, 'Drought Index');
+
+//-----------------------------------------------------------------------
+// Export the drought index to Google Drive as a GeoTIFF
+Export.image.toDrive({
+  image: droughtIndex.clip(aoi),
+  description: 'Drought_Index_2020',
+  scale: 30,
+  region: aoi,
+  maxPixels: 1e13
+});
