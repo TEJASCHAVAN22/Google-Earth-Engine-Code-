@@ -1,0 +1,62 @@
+var aoi = ee.FeatureCollection("projects/ee-urmiganguly05/assets/IPAN_Project");
+Map.centerObject(aoi, 8);
+
+// Function to compute NDVI
+function computeNDVI(image) {
+  var ndvi = image.expression(
+    '(NIR - RED) / (NIR + RED)', {
+      'NIR': image.select('SR_B5').multiply(0.0000275).add(-0.2), // Scale factor 
+      'RED': image.select('SR_B4').multiply(0.0000275).add(-0.2)
+  }).rename('NDVI');
+
+  return ndvi.copyProperties(image, ['system:time_start']);
+}
+
+// Load Landsat 8/9 Surface Reflectance Collection
+var landsat8 = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2') // Use SR dataset
+                                        .filterBounds(aoi)
+                                        .filterDate('2014-01-01', '2024-12-31')
+                                        .map(computeNDVI); // Compute NDVI
+
+// Create a yearly NDVI composite
+var yearlyNDVI = ee.ImageCollection.fromImages(
+    ee.List.sequence(2014, 2024).map(function(year) {
+        var start = ee.Date.fromYMD(year, 1, 1);
+        var end = start.advance(1, 'year');
+        var composite = landsat8
+            .filterDate(start, end)
+            .select('NDVI')
+            .mean()
+            .set({'year': year, 'system:time_start': start.millis()});
+        return composite;
+    })
+);
+
+
+// Create a time series chart
+var chart = ui.Chart.image.series({
+  imageCollection: yearlyNDVI,
+  region: aoi,
+  reducer: ee.Reducer.mean(),
+  scale: 1000,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'Monthly Mean NDVI Time Series (AOI) - Landsat 8/9',
+  hAxis: { title: 'Time', format: 'YYYY-MM', gridlines: { count: 12 } },
+  vAxis: { title: 'Mean NDVI', minValue: 0, maxValue: 1 },
+  lineWidth: 2,
+  pointSize: 3,
+  colors: ['#1a9850']
+});
+
+// Display chart
+print(chart);
+
+// Select a representative NDVI image for visualization
+var ndviImage = landsat8.mean(); // Use `landsat8`, not undefined `landsatNdvi`
+
+// Visualization parameters for NDVI
+var ndviVis = { min: 0, max: 0.8, palette: ['blue', 'white', 'green'] };
+Map.addLayer(ndviImage.clip(aoi), ndviVis, 'NDVI');
+
+
