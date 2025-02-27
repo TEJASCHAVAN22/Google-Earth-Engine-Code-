@@ -1,0 +1,63 @@
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+
+// Load MODIS LST dataset (MOD11A2)
+var modisLST = ee.ImageCollection("MODIS/061/MOD11A2")
+                               .filterDate('2024-01-01', '2024-01-31')
+                               .filterBounds(aoi)
+                               .select('LST_Day_1km')
+                               .mean()
+                               .multiply(0.02); // Scale factor
+
+// Load MODIS NDVI dataset (MOD13A2)
+var modisNDVI = ee.ImageCollection("MODIS/061/MOD13A2")
+                             .filterDate('2024-01-01', '2024-01-31')
+                             .filterBounds(aoi)
+                             .select('NDVI')
+                             .mean()
+                             .multiply(0.0001); // Scale factor
+
+// Define visualization parameters
+var lstViz = { min: 250, max: 320, palette: ['blue', 'cyan', 'yellow', 'orange', 'red'] };
+var ndviViz = { min: 0, max: 1, palette: ['brown', 'yellow', 'green'] };
+
+// Add layers to the map
+Map.centerObject(aoi, 5);
+Map.addLayer(modisLST.clip(aoi), lstViz, 'MODIS LST');
+Map.addLayer(modisNDVI.clip(aoi), ndviViz, 'MODIS NDVI');
+
+// Print dataset information
+print('MODIS LST:', modisLST);
+print('MODIS NDVI:', modisNDVI);
+
+// Sample data with a reduced number of points
+var samplePoints = modisLST.addBands(modisNDVI).sample({
+  region: aoi,
+  scale: 1000,  // MODIS resolution
+  numPixels: 500, // Limit to avoid errors
+  geometries: true
+});
+
+// Convert to a FeatureCollection with LST and NDVI properties
+var lstNdviTable = samplePoints.map(function(feature) {
+  return feature.set({
+    LST: feature.get('LST_Day_1km'),
+    NDVI: feature.get('NDVI')
+  });
+});
+
+// Print sample data
+print('Sampled LST and NDVI:', lstNdviTable);
+
+// Generate a scatter plot
+var chart = ui.Chart.feature.byFeature(lstNdviTable, 'LST', ['NDVI'])
+  .setChartType('ScatterChart')
+  .setOptions({
+    title: 'Correlation between LST and NDVI',
+    hAxis: { title: 'Land Surface Temperature (LST in K)' },
+    vAxis: { title: 'Normalized Difference Vegetation Index (NDVI)' },
+    pointSize: 3,
+    trendlines: { 0: { color: 'red', visibleInLegend: true } } // Adds trendline
+  });
+
+// Display the chart
+print(chart);
