@@ -1,1 +1,93 @@
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 5);
+
+// Import a DEM dataset
+var dem = ee.Image('USGS/SRTMGL1_003');
+
+// Calculate slope
+var slope = ee.Terrain.slope(dem);
+
+// Calculate mean elevation in a neighborhood (3x3)
+var neighborhood = dem.focal_mean(30, 'square', 'meters');
+
+// Calculate relative height
+var relativeHeight = dem.subtract(neighborhood);
+
+// Define thresholds for slope position classification
+var steep = slope.gt(15); // Slope greater than 15 degrees
+var flat = slope.lte(5); // Slope less than or equal to 5 degrees
+
+// Combine conditions to classify slope position
+var slopePosition = steep.add(flat.multiply(2)); // 1 for steep, 2 for flat
+
+// Define visualization parameters
+var visParams = {
+  min: 0,
+  max: 1,
+  palette: ['red' ,'green'] // Low = Green (1), High = Red ()
+};
+
+// Add the layer to the map
+Map.addLayer(slopePosition.clip(aoi), visParams, 'Slope Position');
+
+// Create a legend
+var legend = ui.Panel({
+  style: {
+    position: 'bottom-left',
+    padding: '8px',
+    backgroundColor: 'white'
+  }
+});
+
+// Title of the legend
+var legendTitle = ui.Label({
+  value: 'Slope Position',
+  style: {
+    fontWeight: 'bold',
+    fontSize: '14px',
+    margin: '0 0 4px 0',
+    padding: '2px'
+  }
+});
+legend.add(legendTitle);
+
+// Define legend colors and labels
+var legendColors = ['red', 'green'];
+var legendLabels = ['Low (1)', 'High (0)'];
+
+// Loop through legend items
+for (var i = 0; i < legendColors.length; i++) {
+  var colorBox = ui.Label({
+    style: {
+      backgroundColor: legendColors[i],
+      padding: '8px',
+      margin: '4px',
+      width: '20px',
+      height: '20px'
+    }
+  });
+
+  var label = ui.Label({
+    value: legendLabels[i],
+    style: { margin: '4px' }
+  });
+
+  var legendItem = ui.Panel({
+    widgets: [colorBox, label],
+    layout: ui.Panel.Layout.Flow('horizontal')
+  });
+
+  legend.add(legendItem);
+}
+
+// Add legend to the map
+Map.add(legend);
+
+// Export results (optional)
+Export.image.toDrive({
+  image: slopePosition,
+  description: 'SlopePosition',
+  scale: 30,
+  region: aoi // Define your region of interest
+});
 
