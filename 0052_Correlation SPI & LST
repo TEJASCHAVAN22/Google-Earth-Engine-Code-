@@ -1,0 +1,82 @@
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+
+// Load MODIS Land Surface Temperature (LST) dataset (MOD11A2)
+var modisLST = ee.ImageCollection("MODIS/061/MOD11A2")
+                             .filterDate('2024-01-01', '2024-01-31')
+                             .filterBounds(aoi)
+                             .select('LST_Day_1km')
+                             .mean()
+                             .multiply(0.02)  // Scale factor to convert to Kelvin
+                             .subtract(273.15); // Convert to Celsius
+
+// Load CHIRPS precipitation dataset
+var chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+                .filterDate('2023-10-01', '2024-01-31') // 3-month period
+                .filterBounds(aoi)
+                .select('precipitation');
+
+// Compute total precipitation over the period
+var totalPrecip = chirps.sum();
+
+// Compute SPI (Standardized Precipitation Index)
+var meanPrecip = totalPrecip.reduceRegion({
+  reducer: ee.Reducer.mean(),
+  geometry: aoi,
+  scale: 5000,
+  maxPixels: 1e13
+}).getNumber('precipitation');
+
+var stdPrecip = totalPrecip.reduceRegion({
+  reducer: ee.Reducer.stdDev(),
+  geometry: aoi,
+  scale: 5000,
+  maxPixels: 1e13
+}).getNumber('precipitation');
+
+var spi = totalPrecip.subtract(meanPrecip).divide(stdPrecip);
+
+// Define visualization parameters
+var spiViz = { min: -2, max: 2, palette: ['red', 'yellow', 'green', 'blue'] };
+var lstViz = { min: 10, max: 45, palette: ['blue', 'cyan', 'yellow', 'red'] };
+
+// Add layers to the map
+Map.centerObject(aoi, 5);
+Map.addLayer(spi.clip(aoi), spiViz, 'SPI');
+Map.addLayer(modisLST.clip(aoi), lstViz, 'MODIS LST');
+
+// Print dataset information
+print('SPI:', spi);
+print('MODIS LST:', modisLST);
+
+// Sample data with a reduced number of points
+var samplePoints = modisLST.addBands(spi).sample({
+  region: aoi,
+  scale: 1000,  // Coarser scale for SPI
+  numPixels: 500, // Limit to avoid errors
+  geometries: true
+});
+
+// Convert to a FeatureCollection with SPI and LST properties
+var spiLSTTable = samplePoints.map(function(feature) {
+  return feature.set({
+    SPI: feature.get('precipitation'),
+    LST: feature.get('LST_Day_1km')
+  });
+});
+
+// Print sample data
+print('Sampled SPI and LST:', spiLSTTable);
+
+// Generate a scatter plot
+var chart = ui.Chart.feature.byFeature(spiLSTTable, 'SPI', ['LST'])
+  .setChartType('ScatterChart')
+  .setOptions({
+    title: 'Correlation between SPI and LST',
+    hAxis: { title: 'Standardized Precipitation Index (SPI)' },
+    vAxis: { title: 'Land Surface Temperature (LST in Celsius)' },
+    pointSize: 3,
+    trendlines: { 0: { color: 'red', visibleInLegend: true } } // Adds trendline
+  });
+
+// Display the chart
+print(chart);
