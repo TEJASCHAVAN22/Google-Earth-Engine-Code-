@@ -1,0 +1,22 @@
+// Define Area of Interest (AOI)
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric'); 
+
+// Load Landsat 8 Surface Reflectance Data
+var landsat = ee.ImageCollection('LANDSAT/LC08/C02/T1_TOA')
+                .filterBounds(aoi)
+                .filterDate('2023-01-01', '2023-12-31')
+                .median()
+                .clip(aoi);
+
+// True Color Composite (Red, Green, Blue)
+var trueColorVis = {
+  bands: ['B4', 'B3', 'B2'],  // (Red, Green, Blue)
+  min: 0,
+  max: 0.3, 
+  gamma: 1.4
+};
+
+// Add layers to the map
+Map.centerObject(aoi, 8);
+Map.addLayer(landsat, trueColorVis, 'True Color Composite (Natural)');
+
