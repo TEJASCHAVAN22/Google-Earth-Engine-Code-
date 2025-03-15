@@ -1,0 +1,78 @@
+// Load Region of Interest (ROI) from an Asset Shapefile
+var roi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(roi, 5); // Center the map on the region
+
+// Define Time Range for Analysis
+var time_start = '2023-01-01';
+var time_end = '2023-12-31';
+
+// Load Daily Precipitation Data from CHIRPS
+var pr = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+  .select('precipitation') // Select the precipitation band
+  .filterDate(time_start, time_end) // Filter by time range
+  .filterBounds(roi); // Filter by spatial region
+
+// Function to Compute Mean & Maximum Precipitation for Each Image
+function pr_class(img) {
+  // Compute the mean precipitation over the region
+  var pr_mean = img.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: roi,
+    scale: 27000
+  }).values().get(0);
+
+  // Compute the maximum precipitation over the region
+  var pr_max = img.reduceRegion({
+    reducer: ee.Reducer.max(),
+    geometry: roi,
+    scale: 27000
+  }).values().get(0);
+
+  // Attach computed values as properties to the image
+  return img
+    .copyProperties(img, img.propertyNames())
+    .set('pr_mean', pr_mean)
+    .set('pr_max', pr_max);
+}
+
+// Apply the Function to Compute Precipitation Statistics for Each Image
+var pr_values = pr.map(pr_class);
+
+// **Classify Days Based on Precipitation Thresholds**
+var dry = pr_values.filter(ee.Filter.lt('pr_mean', 0.5)); // Dry Days: < 0.5 mm
+var wet = pr_values.filter(ee.Filter.gt('pr_mean', 1));   // Wet Days: > 1 mm
+var mid = pr_values
+  .filter(ee.Filter.gte('pr_mean', 0.5)) // Moderate Days: 0.5 - 1 mm
+  .filter(ee.Filter.lte('pr_mean', 1));
+
+// **Generate and Display Precipitation Charts**
+// Dry Days Chart
+print(ui.Chart.image.series(dry, roi, ee.Reducer.mean(), 27000, 'system:time_start')
+  .setChartType('ColumnChart')
+  .setOptions({title: 'Dry Days (pr_mean < 0.5 mm)'}));
+
+// Wet Days Chart
+print(ui.Chart.image.series(wet, roi, ee.Reducer.mean(), 27000, 'system:time_start')
+  .setChartType('ColumnChart')
+  .setOptions({title: 'Wet Days (pr_mean > 1 mm)'}));
+
+// Print List of Moderate Rainfall Days (0.5 ≤ pr_mean ≤ 1 mm)
+print('Moderate Rain Days:', mid.aggregate_array('pr_mean'));
+
+// **Enhanced Visualization for Dry and Wet Days**
+var dry_vis = {min: 0, max: 0.6, 
+                 palette: ['#fff5cc', '#ffeb99', '#ffd966', '#ffb84d', '#ff8c1a', '#ff6600']
+}; // Shades of yellow-orange for dry areas
+
+var wet_vis = {
+  min: 1, max: 60, 
+  palette: ['#e6f7ff', '#b3e0ff', '#66c2ff', '#3399ff', '#0073e6', '#0047b3']
+}; // Shades of blue for wet areas
+
+// Calculate Mean Dry and Wet Precipitation
+var dry_mean = dry.mean(); // Average precipitation during dry days
+var wet_mean = wet.mean(); // Average precipitation during wet days
+
+// Add Layers to Map
+Map.addLayer(dry_mean.clip(roi), dry_vis, 'Dry Days (Mean)');
+Map.addLayer(wet_mean.clip(roi), wet_vis, 'Wet Days (Mean)');
