@@ -1,0 +1,49 @@
+// Load AOI (replace with your asset)
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 10);
+
+// Load Sentinel-2 Surface Reflectance dataset
+var s2 = ee.ImageCollection('COPERNICUS/S2_SR')
+            .filterBounds(aoi)
+            .filterDate('2023-01-01', '2023-12-31')
+            .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10)) // Filter images with <10% clouds
+            .select(['B3', 'B6', 'B2', 'B8']); // Green, SWIR1, Blue, NIR
+
+// Function to compute AWEI
+var computeAWEI = function(image) {
+  var green = image.select('B3'); // Green band
+  var swir1 = image.select('B6'); // SWIR1 band
+  var blue = image.select('B2');  // Blue band
+  var nir = image.select('B8');   // NIR band
+  
+  var awei = green.multiply(0.304)
+              .add(swir1.multiply(0.474))
+              .add(blue.multiply(0.050))
+              .subtract(nir.multiply(0.250))
+              .rename('AWEI');
+  
+  return image.addBands(awei);
+};
+
+// Apply the function to compute AWEI
+var s2WithAWEI = s2.map(computeAWEI);
+
+// Generate median composite and clip to AOI
+var aweiComposite = s2WithAWEI.median().clip(aoi);
+
+// Display the AWEI result
+Map.addLayer(aweiComposite.select('AWEI'), 
+             {min: -1, max: 1, palette: ['blue', 'white', 'brown']}, 
+             'AWEI');
+
+// Print statistics
+var stats = aweiComposite.reduceRegion({
+  reducer: ee.Reducer.mean().combine({
+    reducer2: ee.Reducer.minMax(),
+    sharedInputs: true
+  }),
+  geometry: aoi,
+  scale: 30,
+  bestEffort: true
+});
+print('AWEI Statistics:', stats);
