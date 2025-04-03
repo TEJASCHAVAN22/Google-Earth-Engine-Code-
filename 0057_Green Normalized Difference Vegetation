@@ -1,0 +1,59 @@
+// Load the AOI from asset
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 10);
+
+// Load Sentinel-2 Image Collection
+var sentinel2 = ee.ImageCollection('COPERNICUS/S2')
+                   .filterBounds(aoi)
+                   .filterDate('2023-01-01', '2023-12-31')
+                   .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20)) // Filter images with <20% cloud cover
+                   .select(['B8', 'B3']); // Select NIR (B8) and Green (B3) bands
+
+// Function to compute GNDVI
+var computeGNDVI = function(image) {
+  var nir = image.select('B8');
+  var green = image.select('B3');
+  var gndvi = nir.subtract(green).divide(nir.add(green)).rename('GNDVI');
+  return image.addBands(gndvi);
+};
+
+// Apply the function to compute GNDVI
+var sentinel2WithGNDVI = sentinel2.map(computeGNDVI);
+
+// Clip to AOI and compute the median composite
+var clippedGNDVI = sentinel2WithGNDVI.median().clip(aoi);
+
+// Add GNDVI layer to the map
+Map.addLayer(clippedGNDVI.select('GNDVI'), {min: -1, max: 1, palette: ['blue', 'green', 'yellow', 'red']}, 'GNDVI');
+
+// Generate a time series chart for GNDVI over the AOI
+var chart = ui.Chart.image.series({
+  imageCollection: sentinel2WithGNDVI.select('GNDVI'),
+  region: aoi,
+  reducer: ee.Reducer.mean(),
+  scale: 30,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'Time Series of GNDVI',
+  hAxis: {title: 'Date'},
+  vAxis: {title: 'GNDVI'},
+  lineWidth: 2,
+  pointSize: 4
+});
+
+// Print the chart to the console
+print(chart);
+
+// Compute statistical information (Mean, Min, Max)
+var stats = clippedGNDVI.reduceRegion({
+  reducer: ee.Reducer.mean().combine({
+    reducer2: ee.Reducer.minMax(),
+    sharedInputs: true
+  }),
+  geometry: aoi,
+  scale: 30,
+  bestEffort: true
+});
+
+// Print statistics
+print('GNDVI Statistics:', stats);
