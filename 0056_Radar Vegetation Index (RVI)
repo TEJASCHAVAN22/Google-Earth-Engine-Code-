@@ -1,0 +1,66 @@
+// Load the AOI from asset
+// This script analyzes vegetation using the Radar Vegetation Index (RVI) from Sentinel-1 SAR data
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 10);
+
+// Load Sentinel-1 SAR dataset
+// Sentinel-1 GRD dataset contains dual-polarized SAR data (VV & VH bands) used for vegetation analysis
+var sentinel1 = ee.ImageCollection('COPERNICUS/S1_GRD')
+                         .filterBounds(aoi) // Use geometry here
+                         .filterDate('2023-01-01', '2023-12-31')
+                         .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+                         .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+                         .filter(ee.Filter.eq('instrumentMode', 'IW'))
+                         .select(['VV', 'VH']); // Selecting VV and VH bands
+
+// Function to compute RVI
+// The Radar Vegetation Index (RVI) is calculated using the formula: RVI = (4 * VH) / (2 * VV + 2 * VH)
+var computeRVI = function(image) {
+  var vv = image.select('VV');
+  var vh = image.select('VH');
+  var rvi = vh.multiply(4).divide(vv.add(vv).add(vh.multiply(2))).rename('RVI');
+  return image.addBands(rvi);
+};
+
+// Apply the function to compute RVI for each image in the collection
+var sentinel1WithRVI = sentinel1.map(computeRVI);
+
+// Clip to AOI
+// Extracts the median composite RVI values over the study area
+var clippedComposite = sentinel1WithRVI.median().clip(aoi);
+Map.addLayer(clippedComposite.select('RVI'), {min: 0, max: 10, palette: ['blue', 'green', 'yellow', 'red']}, 'RVI');
+
+// Generate a time series chart for RVI over the AOI
+// This chart helps visualize RVI changes over time
+var chart = ui.Chart.image.series({
+  imageCollection: sentinel1WithRVI.select('RVI'),
+  region: aoi,
+  reducer: ee.Reducer.mean(),
+  scale: 1000,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'Time Series of RVI',
+  hAxis: {title: 'Date'},
+  vAxis: {title: 'RVI'},
+  lineWidth: 2,
+  pointSize: 4
+});
+
+// Print the chart to the console
+print(chart);
+
+// Generate statistical information
+// Computes mean, minimum, and maximum RVI values within the AOI
+var stats = clippedComposite.reduceRegion({
+  reducer: ee.Reducer.mean().combine({
+    reducer2: ee.Reducer.minMax(),
+    sharedInputs: true
+  }),
+  geometry: aoi,
+  scale: 1000,
+  bestEffort: true
+});
+
+// Print statistics
+print('RVI Statistics:', stats);
+
