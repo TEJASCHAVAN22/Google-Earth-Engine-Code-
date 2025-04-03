@@ -1,0 +1,57 @@
+// Load the AOI (Area of Interest)
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 10);
+
+// Load Sentinel-2 Image Collection
+var sentinel2 = ee.ImageCollection('COPERNICUS/S2')
+                   .filterBounds(aoi)
+                   .filterDate('2023-01-01', '2023-12-31')
+                   .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10)) // Filtering clouds
+                   .select(['B8', 'B2']); // Selecting NIR (B8) and BLUE (B2) bands
+
+// Function to compute DPSI
+var computeDPSI = function(image) {
+  var nir = image.select('B8');
+  var blue = image.select('B2');
+  var dpsi = nir.subtract(blue).divide(nir.add(blue)).rename('DPSI');
+  return image.addBands(dpsi);
+};
+
+// Apply the function to compute DPSI
+var sentinel2WithDPSI = sentinel2.map(computeDPSI);
+
+// Create a median composite and clip to AOI
+var clippedComposite = sentinel2WithDPSI.median().clip(aoi);
+Map.addLayer(clippedComposite.select('DPSI'), {min: -1, max: 1, palette: ['blue', 'green', 'yellow', 'red']}, 'DPSI');
+
+// Generate a time series chart for DPSI over the AOI
+var chart = ui.Chart.image.series({
+  imageCollection: sentinel2WithDPSI.select('DPSI'),
+  region: aoi,
+  reducer: ee.Reducer.mean(),
+  scale: 10,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'Time Series of DPSI',
+  hAxis: {title: 'Date'},
+  vAxis: {title: 'DPSI'},
+  lineWidth: 2,
+  pointSize: 4
+});
+
+// Print the chart to the console
+print(chart);
+
+// Compute statistical information
+var stats = clippedComposite.reduceRegion({
+  reducer: ee.Reducer.mean().combine({
+    reducer2: ee.Reducer.minMax(),
+    sharedInputs: true
+  }),
+  geometry: aoi,
+  scale: 10,
+  bestEffort: true
+});
+
+// Print statistics
+print('DPSI Statistics:', stats);
