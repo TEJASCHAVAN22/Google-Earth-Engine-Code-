@@ -1,0 +1,61 @@
+// Load the AOI from asset
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 10);
+
+// Load Sentinel-2 Image Collection
+var sentinel2 = ee.ImageCollection('COPERNICUS/S2')
+                    .filterBounds(aoi)
+                    .filterDate('2023-01-01', '2023-12-31')
+                    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10)) // Filtering low-cloud images
+                    .select(['B8', 'B4']); // Selecting NIR (B8) and Red (B4)
+
+// Function to compute TVI
+var computeTVI = function(image) {
+  var nir = image.select('B8'); // Near Infrared Band
+  var red = image.select('B4'); // Red Band
+  var tvi = nir.subtract(red).divide(nir.add(red)).multiply(0.5).add(0.5).rename('TVI');
+  return image.addBands(tvi);
+};
+
+// Apply the function to compute TVI
+var sentinel2WithTVI = sentinel2.map(computeTVI);
+
+// Compute the median TVI and clip to AOI
+var clippedTVI = sentinel2WithTVI.median().clip(aoi);
+
+// Display TVI on the map
+Map.addLayer(clippedTVI.select('TVI'), 
+  {min: 0, max: 1, palette: ['blue', 'green', 'yellow', 'red']}, 
+  'TVI');
+
+// Generate a time series chart for TVI over the AOI
+var chart = ui.Chart.image.series({
+  imageCollection: sentinel2WithTVI.select('TVI'),
+  region: aoi,
+  reducer: ee.Reducer.mean(),
+  scale: 30,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'Time Series of TVI',
+  hAxis: {title: 'Date'},
+  vAxis: {title: 'TVI'},
+  lineWidth: 2,
+  pointSize: 4
+});
+
+// Print the chart to the console
+print(chart);
+
+// Generate statistical information
+var stats = clippedTVI.reduceRegion({
+  reducer: ee.Reducer.mean().combine({
+    reducer2: ee.Reducer.minMax(),
+    sharedInputs: true
+  }),
+  geometry: aoi,
+  scale: 30,
+  bestEffort: true
+});
+
+// Print statistics
+print('TVI Statistics:', stats);
