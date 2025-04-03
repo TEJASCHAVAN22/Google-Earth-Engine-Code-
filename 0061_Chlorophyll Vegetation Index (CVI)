@@ -1,0 +1,57 @@
+// Load the AOI from an asset
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 10);
+
+// Load Sentinel-2 image collection
+var sentinel2 = ee.ImageCollection('COPERNICUS/S2')
+                  .filterBounds(aoi)
+                  .filterDate('2023-01-01', '2023-12-31')
+                  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20)) // Filter cloudy images
+                  .select(['B8', 'B3']); // Selecting NIR (B8) and Green (B3) bands
+
+// Function to compute CVI
+var computeCVI = function(image) {
+  var nir = image.select('B8'); // Near-Infrared Band
+  var green = image.select('B3'); // Green Band
+  var cvi = nir.divide(green).subtract(1).rename('CVI');
+  return image.addBands(cvi);
+};
+
+// Apply the function to compute CVI for each image in the collection
+var sentinel2WithCVI = sentinel2.map(computeCVI);
+
+// Clip to AOI and get the median composite
+var clippedComposite = sentinel2WithCVI.median().clip(aoi);
+Map.addLayer(clippedComposite.select('CVI'), {min: 0, max: 5, palette: ['blue', 'green', 'yellow', 'red']}, 'CVI');
+
+// Generate a time series chart for CVI over the AOI
+var chart = ui.Chart.image.series({
+  imageCollection: sentinel2WithCVI.select('CVI'),
+  region: aoi,
+  reducer: ee.Reducer.mean(),
+  scale: 10,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'Time Series of CVI',
+  hAxis: {title: 'Date'},
+  vAxis: {title: 'CVI'},
+  lineWidth: 2,
+  pointSize: 4
+});
+
+// Print the chart to the console
+print(chart);
+
+// Generate statistical information
+var stats = clippedComposite.reduceRegion({
+  reducer: ee.Reducer.mean().combine({
+    reducer2: ee.Reducer.minMax(),
+    sharedInputs: true
+  }),
+  geometry: aoi,
+  scale: 10,
+  bestEffort: true
+});
+
+// Print statistics
+print('CVI Statistics:', stats);
