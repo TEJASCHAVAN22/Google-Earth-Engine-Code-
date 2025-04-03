@@ -1,0 +1,57 @@
+// Load the AOI from asset
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 10);
+
+// Load Sentinel-2 image collection
+var sentinel2 = ee.ImageCollection('COPERNICUS/S2')
+                    .filterBounds(aoi)
+                    .filterDate('2023-01-01', '2023-12-31')
+                    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20)) // Filter low cloud cover
+                    .select(['B8', 'B11']); // Selecting NIR (B8) and SWIR (B11) bands
+
+// Function to compute LSWI
+var computeLSWI = function(image) {
+  var nir = image.select('B8'); // Near-Infrared Band
+  var swir = image.select('B11'); // Shortwave Infrared Band
+  var lswi = nir.subtract(swir).divide(nir.add(swir)).rename('LSWI');
+  return image.addBands(lswi);
+};
+
+// Apply the function to compute LSWI
+var sentinel2WithLSWI = sentinel2.map(computeLSWI);
+
+// Clip to AOI and compute median composite
+var clippedComposite = sentinel2WithLSWI.median().clip(aoi);
+Map.addLayer(clippedComposite.select('LSWI'), {min: -1, max: 1, palette: ['blue', 'white', 'green']}, 'LSWI');
+
+// Generate a time series chart for LSWI over the AOI
+var chart = ui.Chart.image.series({
+  imageCollection: sentinel2WithLSWI.select('LSWI'),
+  region: aoi,
+  reducer: ee.Reducer.mean(),
+  scale: 1000,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'Time Series of LSWI',
+  hAxis: {title: 'Date'},
+  vAxis: {title: 'LSWI'},
+  lineWidth: 2,
+  pointSize: 4
+});
+
+// Print the chart to the console
+print(chart);
+
+// Generate statistical information
+var stats = clippedComposite.reduceRegion({
+  reducer: ee.Reducer.mean().combine({
+    reducer2: ee.Reducer.minMax(),
+    sharedInputs: true
+  }),
+  geometry: aoi,
+  scale: 1000,
+  bestEffort: true
+});
+
+// Print statistics
+print('LSWI Statistics:', stats);
