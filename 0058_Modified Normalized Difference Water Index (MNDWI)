@@ -1,0 +1,60 @@
+// Load the AOI (Area of Interest)
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 10);
+
+// Load Sentinel-2 Image Collection
+var sentinel2 = ee.ImageCollection('COPERNICUS/S2')
+                    .filterBounds(aoi)
+                    .filterDate('2023-01-01', '2023-12-31')
+                    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10)) // Filter for low cloud cover
+                    .select(['B3', 'B11']); // Select Green (B3) and SWIR (B11) bands
+
+// Function to Compute MNDWI
+var computeMNDWI = function(image) {
+  var green = image.select('B3'); // Green Band
+  var swir = image.select('B11'); // Shortwave Infrared (SWIR) Band
+  var mndwi = green.subtract(swir).divide(green.add(swir)).rename('MNDWI');
+  return image.addBands(mndwi);
+};
+
+// Apply the Function to Compute MNDWI
+var sentinel2WithMNDWI = sentinel2.map(computeMNDWI);
+
+// Create a Median Composite and Clip to AOI
+var mndwiComposite = sentinel2WithMNDWI.median().clip(aoi);
+
+// Add Layer to Map
+var mndwiVis = {min: -1, max: 1, palette: ['blue', 'cyan', 'green', 'yellow', 'red']};
+Map.addLayer(mndwiComposite.select('MNDWI'), mndwiVis, 'MNDWI');
+
+// Generate Time Series Chart for MNDWI
+var chart = ui.Chart.image.series({
+  imageCollection: sentinel2WithMNDWI.select('MNDWI'),
+  region: aoi,
+  reducer: ee.Reducer.mean(),
+  scale: 500,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'Time Series of MNDWI',
+  hAxis: {title: 'Date'},
+  vAxis: {title: 'MNDWI'},
+  lineWidth: 2,
+  pointSize: 4
+});
+
+// Print the Chart
+print(chart);
+
+// Compute Statistics (Mean, Min, Max)
+var stats = mndwiComposite.reduceRegion({
+  reducer: ee.Reducer.mean().combine({
+    reducer2: ee.Reducer.minMax(),
+    sharedInputs: true
+  }),
+  geometry: aoi,
+  scale: 500,
+  bestEffort: true
+});
+
+// Print Statistics
+print('MNDWI Statistics:', stats);
