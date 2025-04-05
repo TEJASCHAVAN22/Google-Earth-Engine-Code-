@@ -1,0 +1,46 @@
+// Load AOI
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 5);
+
+// Load Sentinel-2 image collection
+var s2 = ee.ImageCollection('COPERNICUS/S2')
+            .filterBounds(aoi)
+            .filterDate('2023-01-01', '2023-12-31')
+            .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10))
+            .select(['B8', 'B4']); // NIR and Red
+
+// Compute NDVI
+var withNDVI = s2.map(function(image) {
+  var ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI');
+  return image.addBands(ndvi);
+});
+
+// Estimate LAI from NDVI
+var withLAI = withNDVI.map(function(image) {
+  var ndvi = image.select('NDVI');
+  var lai = ndvi.expression(
+    '-log((0.69 - NDVI) / 0.59)', {
+      'NDVI': ndvi
+    }).rename('LAI');
+  return image.addBands(lai);
+});
+
+// Median LAI clipped to AOI
+var laiS2 = withLAI.select('LAI').median().clip(aoi);
+Map.addLayer(laiS2, {min: 0, max: 6, palette: ['white', 'green', 'darkgreen']}, 'Sentinel-2 Estimated LAI');
+
+// Time series chart
+var chartS2 = ui.Chart.image.series({
+  imageCollection: withLAI.select('LAI'),
+  region: aoi,
+  reducer: ee.Reducer.mean(),
+  scale: 100,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'Estimated LAI (Sentinel-2) Time Series',
+  hAxis: {title: 'Date'},
+  vAxis: {title: 'LAI'},
+  lineWidth: 2,
+  pointSize: 3
+});
+print(chartS2);
