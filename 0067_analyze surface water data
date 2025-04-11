@@ -1,0 +1,37 @@
+// ----------------------------------------------------------
+// Load AOI shapefile and datasets
+// ----------------------------------------------------------
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+var geometry = aoi.geometry();
+Map.centerObject(geometry, 6);  // Center map on AOI
+
+var gsw = ee.Image("JRC/GSW1_4/GlobalSurfaceWater");  // Global Surface Water
+var hydrobasins = ee.FeatureCollection("WWF/HydroSHEDS/v1/Basins/hybas_7");  // Optional: not used here
+
+// ----------------------------------------------------------
+// Select and clip the surface water layer
+// ----------------------------------------------------------
+var surfaceWater = gsw.select('max_extent').clip(geometry);
+
+// Visualization parameters
+var visParams = {
+  min: 0,
+  max: 1,
+  palette: ['white', 'blue']
+};
+
+// Add original clipped layer to map
+Map.addLayer(surfaceWater, visParams, 'Surface Water (Clipped)');
+
+// ----------------------------------------------------------
+// Unmask and apply morphological filtering (focal operations)
+// ----------------------------------------------------------
+var surfaceWaterUnmasked = surfaceWater.unmask(0);  // Fill masked areas with 0
+
+// Apply focal max and focal min to smooth and fill gaps
+var surfaceWaterProcessed = surfaceWaterUnmasked
+  .focalMax({radius: 30, units: 'meters', kernelType: 'square'})
+  .focalMin({radius: 30, units: 'meters', kernelType: 'square'});
+
+// Add processed layer to map
+Map.addLayer(surfaceWaterProcessed, visParams, 'Surface Water (Processed)');
