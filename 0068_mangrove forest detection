@@ -1,0 +1,122 @@
+// -----------------------------------------------------------------------------
+// 1. Define AOI (South Africa coastal mangrove region)
+// -----------------------------------------------------------------------------
+var aoi = ee.Geometry.Rectangle([32.1, -28.6, 32.6, -28.2]); 
+Map.centerObject(aoi, 10);
+
+// -----------------------------------------------------------------------------
+// 2. Load & prepare Sentinel-2 composite for training (2022)
+// -----------------------------------------------------------------------------
+var refImage = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+  .filterBounds(aoi)
+  .filterDate('2022-01-01', '2022-12-31')
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10))
+  .median()
+  .clip(aoi);
+
+var ndvi = refImage.normalizedDifference(['B8', 'B4']).rename('NDVI');
+var ndwi = refImage.normalizedDifference(['B3', 'B8']).rename('NDWI');
+
+var features = refImage.select(['B2', 'B3', 'B4', 'B8', 'B11', 'B12'])
+                .addBands(ndvi)
+                .addBands(ndwi);
+
+// -----------------------------------------------------------------------------
+// 3. Training Samples
+// -----------------------------------------------------------------------------
+var mangrove = ee.FeatureCollection([
+  ee.Feature(ee.Geometry.Point([32.25, -28.4]), {'class': 1}),
+  ee.Feature(ee.Geometry.Point([32.30, -28.45]), {'class': 1})
+]);
+
+var nonMangrove = ee.FeatureCollection([
+  ee.Feature(ee.Geometry.Point([32.35, -28.5]), {'class': 0}),
+  ee.Feature(ee.Geometry.Point([32.15, -28.3]), {'class': 0})
+]);
+
+var trainingSamples = mangrove.merge(nonMangrove);
+
+// -----------------------------------------------------------------------------
+// 4. Train Random Forest classifier
+// -----------------------------------------------------------------------------
+var training = features.sampleRegions({
+  collection: trainingSamples,
+  properties: ['class'],
+  scale: 10,
+  tileScale: 4
+});
+
+var classifier = ee.Classifier.smileRandomForest(50).train({
+  features: training,
+  classProperty: 'class',
+  inputProperties: features.bandNames()
+});
+
+// -----------------------------------------------------------------------------
+// 5. Time Series: Annual Classification with Error Handling
+// -----------------------------------------------------------------------------
+var years = ee.List.sequence(2017, 2023);
+
+var yearlyStats = ee.FeatureCollection(
+  years.map(function(year) {
+    year = ee.Number(year);
+    var start = ee.Date.fromYMD(year, 1, 1);
+    var end = ee.Date.fromYMD(year, 12, 31);
+    
+    var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+      .filterBounds(aoi)
+      .filterDate(start, end)
+      .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20));
+      
+    var count = s2.size(); // Check if there are images
+    
+    return ee.Algorithms.If(
+      count.gt(0),
+      // If imageCollection is not empty, proceed
+      ee.Feature(null, {
+        'year': year,
+        'mangrove_pixels': s2.median().clip(aoi)
+          .select(['B2', 'B3', 'B4', 'B8', 'B11', 'B12'])
+          .addBands(s2.median().normalizedDifference(['B8', 'B4']).rename('NDVI'))
+          .addBands(s2.median().normalizedDifference(['B3', 'B8']).rename('NDWI'))
+          .classify(classifier)
+          .eq(1)
+          .reduceRegion({
+            reducer: ee.Reducer.sum(),
+            geometry: aoi,
+            scale: 10,
+            maxPixels: 1e13
+          }).get('classification')
+      }),
+      // If imageCollection is empty, return zero
+      ee.Feature(null, {
+        'year': year,
+        'mangrove_pixels': 0
+      })
+    );
+  })
+);
+
+// -----------------------------------------------------------------------------
+// 6. Chart the Time Series
+// -----------------------------------------------------------------------------
+var chart = ui.Chart.feature.byFeature({
+  features: yearlyStats,
+  xProperty: 'year',
+  yProperties: ['mangrove_pixels']
+}).setOptions({
+  title: 'Mangrove Cover (2017–2023)',
+  hAxis: {title: 'Year'},
+  vAxis: {title: 'Mangrove Pixels (approx.)'},
+  lineWidth: 2,
+  pointSize: 4,
+  series: {0: {color: 'green'}}
+});
+
+print(chart);
+
+// -----------------------------------------------------------------------------
+// 7. Show Latest Classification
+// -----------------------------------------------------------------------------
+var latest = features.classify(classifier);
+Map.addLayer(latest, {min: 0, max: 1, palette: ['red', 'green']}, '2022 Classification');
