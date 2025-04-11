@@ -1,0 +1,63 @@
+// Load Area of Interest (AOI)
+// ----------------------------------------------
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 6); // Center the map on AOI
+
+// ----------------------------------------------
+// Load ERA5 Daily Temperature Data (1979–2023)
+// ----------------------------------------------
+var era5 = ee.ImageCollection("ECMWF/ERA5/DAILY")
+                   .filterDate('1979-01-01', '2023-12-31')
+                   .filterBounds(aoi)
+                   .select('mean_2m_air_temperature');
+
+// ----------------------------------------------
+// Compute Mean Monthly Temperature (Long-Term Avg)
+// ----------------------------------------------
+var monthlyTemperature = era5.mean().clip(aoi);
+
+// ----------------------------------------------
+// Compute Annual Mean Temperature (Long-Term Avg)
+// ----------------------------------------------
+var annualTemperature = era5
+  .filter(ee.Filter.calendarRange(1, 12, 'month')) // Include all months
+  .map(function(image) {
+    return image.set('year', image.date().get('year'));
+  })
+  .mean()
+  .clip(aoi);
+
+// ----------------------------------------------
+// Visualization Parameters
+// ----------------------------------------------
+var visParams = {
+  min: 270,
+  max: 310,
+  palette: ['blue', 'green', 'yellow', 'red'],
+};
+
+// ----------------------------------------------
+// Add Layers to Map
+// ----------------------------------------------
+Map.addLayer(monthlyTemperature, visParams, 'Monthly Mean Temperature');
+Map.addLayer(annualTemperature, visParams, 'Annual Mean Temperature');
+
+// ----------------------------------------------
+// Create Time Series Chart of Temperature (1979–2023)
+// ----------------------------------------------
+var chart = ui.Chart.image.seriesByRegion({
+  imageCollection: era5,
+  band: 'mean_2m_air_temperature',
+  regions: aoi,
+  reducer: ee.Reducer.mean(),
+  scale: 5000,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'Temperature Change Over AOI (1979–2023)',
+  vAxis: {title: 'Temperature (K)'},
+  hAxis: {title: 'Year'},
+  lineWidth: 1,
+  pointSize: 3
+});
+
+print(chart);
