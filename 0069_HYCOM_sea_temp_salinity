@@ -1,0 +1,33 @@
+
+var startyear = 2014; 
+var endyear = 2014;
+var startmonth = 1; 
+var endmonth = 12; 
+
+// Compute beginning & end of study period + sequence of months & years
+var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
+var end_date = ee.Date.fromYMD(endyear , endmonth, 30);
+var years = ee.List.sequence(startyear, endyear);
+var months = ee.List.sequence(startmonth,endmonth);
+
+//------------------------------------------------------------------
+// Import the time series of global images, filter 15 days in August, 2018.
+var HYCOM = ee.ImageCollection('HYCOM/sea_temp_salinity')
+                        .filterDate(start_date, end_date);
+
+// Select water temperature at 0 meters and scale to degrees C.
+var seaWaterTemperature = HYCOM.select('water_temp_0')
+    .map(function scaleAndOffset(image) {
+      return ee.Image(image).multiply(0.001).add(20);
+    });
+
+// Define visualization parameters.
+var visParams = {
+  min: -2.0,  // Degrees C
+  max: 34.0,
+  palette: ['000000', '005aff', '43c8c8', 'fff700', 'ff0000'],
+};
+
+// Display mean 15-day temperature on the map.
+Map.setCenter(-88.6, 26.4, 1);
+Map.addLayer(seaWaterTemperature.mean(), visParams, 'Sea Water Temperature');
