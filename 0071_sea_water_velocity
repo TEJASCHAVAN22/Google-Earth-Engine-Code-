@@ -1,0 +1,23 @@
+var startyear = 2014; 
+var endyear = 2014;
+var startmonth = 1; 
+var endmonth = 12; 
+
+// Compute beginning & end of study period + sequence of months & years
+var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
+var end_date = ee.Date.fromYMD(endyear , endmonth, 30);
+var years = ee.List.sequence(startyear, endyear);
+var months = ee.List.sequence(startmonth,endmonth);
+
+//------------------------------------------------------------------
+var dataset = ee.ImageCollection('HYCOM/GLBu0_08/sea_water_velocity')
+                   .filterDate(start_date, end_date);
+                   
+var waterVelocityVis = {
+  min: -1000.0,
+  max: 4000.0,
+  bands: ['velocity_u_0', 'velocity_v_0', 'velocity_v_0'],
+};
+
+Map.setCenter(-88.6, 26.4, 1);
+Map.addLayer(dataset, waterVelocityVis, 'Water Velocity');
