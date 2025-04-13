@@ -1,0 +1,23 @@
+var startyear = 2014; 
+var endyear = 2014;
+var startmonth = 1; 
+var endmonth = 12; 
+
+// Compute beginning & end of study period + sequence of months & years
+var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
+var end_date = ee.Date.fromYMD(endyear , endmonth, 30);
+var years = ee.List.sequence(startyear, endyear);
+var months = ee.List.sequence(startmonth,endmonth);
+
+//------------------------------------------------------------------
+var dataset = ee.ImageCollection('HYCOM/GLBu0_08/sea_surface_elevation')
+                                       .filterDate(start_date, end_date);
+
+var surfaceElevation = dataset.select('surface_elevation');
+var surfaceElevationVis = {
+  min: -2000.0,
+  max: 2000.0,
+  palette: ['blue', 'cyan', 'yellow', 'red'],
+};
+Map.setCenter(-28.1, 28.3, 1);
+Map.addLayer(surfaceElevation, surfaceElevationVis, 'Surface Elevation');
