@@ -1,0 +1,67 @@
+// -------------------------------
+// 1. Define ROI (Polygon Area)
+// -------------------------------
+var cor = [
+          [76.34529839412173, 12.595724516920036],
+          [76.34529839412173, 12.355709984336483],
+          [76.68656121150454, 12.355709984336483],
+          [76.68656121150454, 12.595724516920036]  // Closing the polygon
+];
+
+var roi = ee.Geometry.Polygon(cor);
+
+// Visualize ROI
+Map.addLayer(roi, {}, 'ROI');
+Map.centerObject(roi);
+
+// -------------------------------
+// 2. Time Range & Data Loading
+// -------------------------------
+var time_start = '2001';
+var time_end = '2023';
+
+var modis = ee.ImageCollection("MODIS/061/MOD09A1")
+  .filterDate(time_start, time_end);
+
+// -------------------------------
+// 3. Compute NDWI
+// -------------------------------
+var ndwi = modis.map(function(img) {
+  var band = img.select('sur.*').multiply(0.0001);
+  var index = band.normalizedDifference(['sur_refl_b04', 'sur_refl_b02']).rename('ndwi');
+  return index.copyProperties(img, img.propertyNames());
+});
+
+// Optional: Visualize NDWI stack for a year (off by default)
+Map.addLayer(ndwi.filterDate('2010', '2011').toBands().clip(roi), {}, 'NDWI 2010-2011', false);
+
+// -------------------------------
+// 4. Histogram of NDWI (for 2010-2011)
+// -------------------------------
+var ndwi_average = ndwi.filterDate('2010', '2011').median();
+
+print(
+  ui.Chart.image.histogram(ndwi_average, roi, 500)
+    .setOptions({title: 'NDWI Histogram (2010-2011)', hAxis: {title: 'NDWI'}, vAxis: {title: 'Pixel Count'}})
+);
+
+// -------------------------------
+// 5. Estimate Lake Area Over Time
+// -------------------------------
+var lake_area = ndwi.map(function(img) {
+  var waterMask = img.gt(0.1);  // NDWI > 0.1 threshold for water
+  var masked = waterMask.updateMask(waterMask);
+  var area = masked.multiply(ee.Image.pixelArea().divide(1e6)); // Area in km²
+  return area.copyProperties(img, img.propertyNames());
+});
+
+// Chart the lake area over time
+print(
+  ui.Chart.image.series(
+    lake_area, roi, ee.Reducer.sum(), 500, 'system:time_start'
+  ).setOptions({
+    title: 'Estimated Water Body Area Over Time',
+    vAxis: {title: 'Area (km²)'},
+    hAxis: {title: 'Date'}
+  })
+);
