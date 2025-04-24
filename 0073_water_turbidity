@@ -1,0 +1,51 @@
+// Define Region of Interest (ROI)
+var cor = [
+          [73.16313961489985, 16.699452834042162],
+          [73.16313961489985, 16.263571982057467],
+          [73.62593868716547, 16.263571982057467],
+          [73.62593868716547, 16.699452834042162]
+];
+
+var roi = ee.Geometry.Polygon(cor);
+Map.centerObject(roi, 10);
+
+// Load Sentinel-2 Imagery
+var sen = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+  .select(['B2', 'B3', 'B4', 'B8'])
+  .filterDate('2023', '2024')
+  .filterBounds(roi)
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10))
+  .median()
+  .multiply(0.0001);
+
+// Compute NDWI (Water Index)
+var ndwi = sen.normalizedDifference(['B3', 'B8']).rename('ndwi');
+Map.addLayer(ndwi.clip(roi), {}, 'NDWI');
+
+// NDWI Histogram
+print(ui.Chart.image.histogram(ndwi, roi, 100));
+
+// Threshold NDWI to Extract Water
+var thr = ndwi.gt(0.1);
+Map.addLayer(thr.clip(roi), {}, 'NDWI > 0.1 (Water Mask)');
+
+// Mask Original Sentinel Image with Water Pixels
+var sen_mask = sen.updateMask(thr);
+Map.addLayer(sen_mask.clip(roi), {}, 'Masked Sentinel Image');
+
+// Calculate NDTI (Turbidity Index)
+var ndti = sen_mask.normalizedDifference(['B4', 'B3']).rename('ndti');
+Map.addLayer(ndti.clip(roi), {
+  palette: ['blue', 'green', 'yellow', 'orange', 'red']
+}, 'NDTI');
+
+// Export NDTI Image to Drive
+Export.image.toDrive({
+  image: ndti.clip(roi),
+  description: 'sen2_ndti',
+  region: roi,
+  scale: 10,
+  crs: 'EPSG:4326', // Changed to default if dynamic CRS fails
+  maxPixels: 1e13,
+  folder: 'test'
+});
