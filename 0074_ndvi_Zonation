@@ -1,0 +1,109 @@
+// ------------------ 1. DEFINE AOI ------------------ //
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 8);
+
+// ------------------ 2. LOAD & PROCESS SENTINEL-2 ------------------ //
+var s2 = ee.ImageCollection("COPERNICUS/S2_SR")
+            .filterBounds(aoi)
+            .filterDate('2023-10-01', '2023-12-31')
+            .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10))
+            .map(function(img) {
+              var ndvi = img.normalizedDifference(['B8', 'B4']).rename('NDVI');
+              return img.addBands(ndvi);
+            });
+
+// Get median NDVI for spatial analysis
+var ndvi = s2.select('NDVI').median().clip(aoi);
+
+// ------------------ 3. ZONATION OF NDVI ------------------ //
+var ndviZoned = ndvi.expression(
+  "(b('NDVI') < 0.2) ? 1" +
+  ": (b('NDVI') < 0.4) ? 2" +
+  ": (b('NDVI') < 0.6) ? 3" +
+  ": (b('NDVI') < 0.8) ? 4" +
+  ": 5"
+).rename('NDVI_Zones');
+
+// Zonation visualization
+var zoneVis = {
+  min: 1,
+  max: 5,
+  palette: ['red', 'orange', 'yellow', 'lightgreen', 'green'],
+};
+
+// Add zonation & raw NDVI to the map
+Map.addLayer(ndvi, {min: -1, max: 1, palette: ['white', 'blue', 'green']}, 'NDVI');
+Map.addLayer(ndviZoned.clip(aoi), zoneVis, 'NDVI Zonation');
+
+// ------------------ 4. NDVI TIME SERIES CHART ------------------ //
+var ndviTimeSeries = s2.select('NDVI').map(function(image) {
+  var meanDict = image.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: aoi,
+    scale: 10,
+    maxPixels: 1e9
+  });
+
+  var meanNDVI = ee.Number(meanDict.get('NDVI'));
+  var date = ee.Date(image.get('system:time_start'));
+  return ee.Feature(null, {
+    'NDVI': meanNDVI,
+    'system:time_start': date
+  });
+});
+
+// Create and print the chart
+var chart = ui.Chart.feature.byFeature({
+  features: ndviTimeSeries,
+  xProperty: 'system:time_start',
+  yProperties: ['NDVI']
+}).setChartType('LineChart')
+  .setOptions({
+    title: 'NDVI Time Series (Mean NDVI in AOI)',
+    hAxis: {title: 'Date'},
+    vAxis: {title: 'NDVI'},
+    lineWidth: 2,
+    pointSize: 4,
+    curveType: 'function',
+    legend: {position: 'none'}
+  });
+
+print(chart);
+
+// ------------------ 5. LEGEND UI ------------------ //
+var legend = ui.Panel({
+  style: {
+    position: 'bottom-left',
+    padding: '8px 15px'
+  }
+});
+
+var legendTitle = ui.Label({
+  value: 'NDVI Zonation',
+  style: {fontWeight: 'bold', fontSize: '16px', margin: '0 0 4px 0'}
+});
+legend.add(legendTitle);
+
+var zonationLabels = ['Very Low', 'Low', 'Medium', 'High', 'Very High'];
+var zonationColors = ['red', 'orange', 'yellow', 'lightgreen', 'green'];
+
+for (var i = 0; i < 5; i++) {
+  var colorBox = ui.Label('', {
+    backgroundColor: zonationColors[i],
+    padding: '8px',
+    margin: '0 0 4px 0'
+  });
+
+  var description = ui.Label(zonationLabels[i], {
+    margin: '0 0 4px 6px'
+  });
+
+  var row = ui.Panel({
+    widgets: [colorBox, description],
+    layout: ui.Panel.Layout.Flow('horizontal')
+  });
+
+  legend.add(row);
+}
+
+Map.add(legend);
