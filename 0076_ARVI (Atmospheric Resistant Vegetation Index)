@@ -1,0 +1,70 @@
+// Define the area of interest (AOI)
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/IND_Shapefiles/IND');
+Map.centerObject(aoi, 6);
+
+// Load Sentinel-2 data
+var sentinel2 = ee.ImageCollection('COPERNICUS/S2')
+                  .filterBounds(aoi)  // Filter by AOI
+                  .filterDate('2022-01-01', '2022-12-31')  // Define the date range
+                  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20));  // Filter clouds
+
+// Function to compute ARVI for a single image
+var computeArvi = function(image) {
+  var red = image.select('B4');  // Red (Band 4)
+  var green = image.select('B3');  // Green (Band 3)
+  var blue = image.select('B1');  // Blue (Band 1)
+
+  // Calculate ARVI
+  var arvi = red.subtract(green.subtract(blue))
+                .divide(red.add(green.subtract(blue)))
+                .rename('ARVI');
+
+  // Add the date as a property
+  var date = image.get('system:time_start');
+  return arvi.set('date', date);
+};
+
+// Apply ARVI calculation to the entire image collection
+var arviCollection = sentinel2.map(computeArvi);
+
+// Print the ARVI collection to check
+print(arviCollection);
+
+// Create a time series graph of ARVI for the AOI
+var timeSeries = arviCollection.select('ARVI').getRegion(aoi, 30).filter(ee.Filter.notNull(['ARVI']));
+
+// Convert to a feature collection and add date information
+var timeSeriesChart = ui.Chart.feature.byFeature(timeSeries, 'date', ['ARVI'])
+  .setChartType('LineChart')
+  .setOptions({
+    title: 'ARVI Time Series',
+    vAxis: {title: 'ARVI'},
+    hAxis: {title: 'Date', format: 'YYYY-MM-dd'},
+    lineWidth: 2,
+    pointSize: 3,
+    series: {
+      0: {color: 'blue'}
+    }
+  });
+
+// Print the time series chart
+print(timeSeriesChart);
+
+// Visualization parameters for ARVI (optional)
+var visParams = {
+  min: -1,
+  max: 1,
+  palette: ['blue', 'white', 'green']
+};
+
+// Add ARVI layer (for visualization of ARVI for the latest image)
+Map.addLayer(arviCollection.median().clip(aoi), visParams, 'Median ARVI');
+
+// Optionally, export the ARVI collection to Google Drive (can be large)
+Export.image.toDrive({
+  image: arviCollection.median(),
+  description: 'ARVI_Median',
+  scale: 10,
+  region: aoi,
+  fileFormat: 'GeoTIFF'
+});
