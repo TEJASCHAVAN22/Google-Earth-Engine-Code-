@@ -1,0 +1,190 @@
+// --------------------------------------------------------
+// MODIS-based Crop Water Stress Index (CWSI) Calculation
+// + Monthly Mean
+// + Time-series Chart
+// + Severe Stress Mask
+// --------------------------------------------------------
+
+//-------------------- Preprocessing Functions --------------------
+
+// Compute MODIS QA bits
+var getQABits = function(image) {
+    var pattern = 0;
+    var start = 0;
+    var end = 1;
+    var newName = "cloudmask";
+    for (var i = start; i <= end; i++) {
+       pattern += Math.pow(2, i); 
+    }
+    return image.select([0], [newName])
+                .bitwiseAnd(pattern)
+                .rightShift(start);
+};
+
+// Cloud Mask Function
+var maskClouds = function(image) {
+  var QA = image.select("DetailedQA");
+  var internalCloud = getQABits(QA);
+  return image.updateMask(internalCloud.eq(0));
+};
+
+// Scale MODIS NDVI
+var scaleMOD = function(image2) {
+  return image2
+          .divide(100)
+          .float()
+          .set("system:time_start", image2.get("system:time_start"));
+};
+
+// Scale MODIS LST
+var scaleMOD_lst = function(image) {
+  return image
+          .multiply(0.02)
+          .float()
+          .subtract(273.15)
+          .set("system:time_start", image.get("system:time_start"));
+};
+
+//-------------------- Define AOI and Study Period --------------------
+
+var coords = [[74.15, 18.57],
+              [74.15, 18.54],
+              [74.10, 18.55],
+              [74.10, 18.58]];
+    
+var aoi = ee.FeatureCollection([
+  ee.Feature(ee.Geometry.Polygon([coords], null, false), {
+    "system:index": "0"
+  })
+]);
+Map.centerObject(aoi, 12);
+
+var startyear = 2022; 
+var endyear = 2022;
+var startmonth = 1; 
+var endmonth = 12;
+
+var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
+var end_date = ee.Date.fromYMD(endyear , endmonth, 30);
+
+//-------------------- Load and Preprocess MODIS Data --------------------
+
+var ndvi = ee.ImageCollection('MODIS/006/MOD13Q1')
+            .filterBounds(aoi)
+            .map(maskClouds)
+            .map(scaleMOD)
+            .filterDate(start_date, end_date)
+            .select('NDVI');
+
+var lst = ee.ImageCollection('MODIS/006/MOD11A2')
+            .filterBounds(aoi)
+            .map(scaleMOD_lst)
+            .filterDate(start_date, end_date)
+            .select('LST_Day_1km');
+
+print("lst", lst);
+print("ndvi", ndvi);
+
+//-------------------- Assign Period Numbers --------------------
+
+var addImageNumberlst = function(image) {
+  var start_date = ee.Date(image.get('system:time_start'));
+  var difference = start_date.getRelative('day', 'year'); 
+  var period = difference.divide(8).add(1);
+  return image.set('period', period).set('year',image.date().get('year'));
+};
+
+var addImageNumberndvi = function(image) {
+  var start_date = ee.Date(image.get('system:time_start'));
+  var difference = start_date.getRelative('day', 'year'); 
+  var period = difference.divide(16).add(1);
+  return image.set('period', period).set('year',image.date().get('year'));
+};
+
+var lstFilter = lst.select('LST_Day_1km').map(addImageNumberlst);
+var ndviFilter = ndvi.select('NDVI').map(addImageNumberndvi);
+
+print("lstFilter", lstFilter);
+print("ndviFilter", ndviFilter);
+
+//-------------------- Calculate LST and NDVI min/max --------------------
+
+var minlst = lstFilter.reduce(ee.Reducer.min());
+var maxlst = lstFilter.reduce(ee.Reducer.max());
+
+var lstStats = lstFilter.map(function(image) {
+  return image.set('minlst', minlst).set('maxlst', maxlst);
+});
+
+Map.addLayer(minlst.clip(aoi), {min: 0, max: 100, palette: ['red', 'yellow', 'green']}, 'Min LST');
+Map.addLayer(maxlst.clip(aoi), {min: 0, max: 100, palette: ['red', 'yellow', 'green']}, 'Max LST');
+
+var minNDVI = ndviFilter.reduce(ee.Reducer.min());
+var maxNDVI = ndviFilter.reduce(ee.Reducer.max());
+
+var ndviStats = ndviFilter.map(function(image) {
+  return image.set('minNDVI', minNDVI).set('maxNDVI', maxNDVI);
+});
+
+Map.addLayer(minNDVI.clip(aoi), {min: 0, max: 100, palette: ['red', 'yellow', 'green']}, 'Min NDVI');
+Map.addLayer(maxNDVI.clip(aoi), {min: 0, max: 100, palette: ['red', 'yellow', 'green']}, 'Max NDVI');
+
+//-------------------- Calculate CWSI --------------------
+
+var cwsi = lstStats.map(function(image) {
+  var lst = image.select('LST_Day_1km');
+  var cwsiValue = (lst.subtract(minlst)).divide(maxlst.subtract(minlst));
+  return image.set('cwsi', cwsiValue);
+});
+print('CWSI collection', cwsi);
+
+var Vis = {
+  min: 0,
+  max: 1,
+  palette: ['0000ff','00ffff','ffff00','ff0000','ffffff'],
+};
+
+Map.addLayer(cwsi.map(function(image) {
+  return image.clip(aoi);
+}), Vis, 'CWSI collection');
+
+//-------------------- 🌟 New Improvements Start Here --------------------
+
+// --------- Generate Monthly Mean CWSI ----------
+
+var cwsiCollection = cwsi.map(function(img) {
+  var cwsiImage = img.get('cwsi');
+  return ee.Image(cwsiImage).set('system:time_start', img.get('system:time_start'));
+}).filter(ee.Filter.notNull(['system:time_start']));
+
+var monthlyCWSI = ee.ImageCollection(
+  ee.List.sequence(1, 12).map(function(m) {
+    var filtered = cwsiCollection.filter(ee.Filter.calendarRange(m, m, 'month'));
+    var mean = filtered.mean().set('month', m);
+    return mean.set('system:time_start', ee.Date.fromYMD(startyear, m, 1));
+  })
+);
+
+print('Monthly mean CWSI:', monthlyCWSI);
+
+// Visualize May (Month 5) Example
+Map.addLayer(monthlyCWSI.filter(ee.Filter.eq('month', 5)).first().clip(aoi), Vis, 'May Mean CWSI');
+
+// --------- Create Time-Series Chart of Average CWSI ----------
+
+var chartCWSI = ui.Chart.image.series({
+  imageCollection: monthlyCWSI,
+  region: aoi,
+  reducer: ee.Reducer.mean(),
+  scale: 500,
+  xProperty: 'system:time_start'
+})
+.setOptions({
+  title: 'Monthly Average CWSI Over AOI',
+  hAxis: {title: 'Date'},
+  vAxis: {title: 'CWSI'},
+  lineWidth: 2,
+  pointSize: 4,
+  series: {0: {color: 'red'}}
+});
+print(chartCWSI);
