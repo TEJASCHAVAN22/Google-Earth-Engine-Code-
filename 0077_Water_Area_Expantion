@@ -1,0 +1,61 @@
+
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 5);
+
+
+var esri_lulc10 = ee.ImageCollection("projects/sat-io/open-datasets/landcover/ESRI_Global-LULC_10m_TS");
+
+// Function to remap LULC classes
+function remapper(image) {
+  return image.remap([1,2,4,5,7,8,9,10,11], [1,2,3,4,5,6,7,8,9]);
+}
+
+// Function to get Water class and calculate area
+function getWater(year) {
+  var lulcImage = esri_lulc10
+    .filterDate(year + '-01-01', year + '-12-31') // Filter by year
+    .map(remapper) // Apply remap
+    .mosaic() // Convert to a single Image
+    .clip(aoi); // Clip to AOI
+
+  // Mask all but Water (Class 1)
+  var water = lulcImage.eq(1).selfMask(); 
+
+  // Calculate water area in km²
+  var pixelArea = water.multiply(ee.Image.pixelArea()); // Area in square meters
+  var totalArea = pixelArea.reduceRegion({
+    reducer: ee.Reducer.sum(),
+    geometry: aoi,
+    scale: 10, // 10m resolution
+    maxPixels: 1e13
+  }).getNumber('remapped'); 
+
+  totalArea = totalArea.divide(1e6); // Convert to km²
+  print("Water Area for " + year + ": ", totalArea, "km²");
+
+  return water;
+}
+
+// Add Water layers and calculate area for different years
+var years = [2017, 2018, 2019, 2020, 2021, 2022, 2023];
+
+years.forEach(function(year) {
+  var waterLayer = getWater(year);
+  Map.addLayer(waterLayer, {palette: ['red']}, 'Water ' + year);
+});
+
+// Create legend for Water
+var legend = ui.Panel({
+  style: { position: 'bottom-left', padding: '8px 15px' }
+});
+
+legend.add(ui.Label('Water Area', { fontWeight: 'bold', fontSize: '18px' }));
+legend.add(ui.Panel({
+  widgets: [
+    ui.Label({ style: { backgroundColor: 'red', padding: '8px', margin: '0 0 4px 0' } }),
+    ui.Label({ value: 'Water', style: { margin: '0 0 4px 6px' } })
+  ],
+  layout: ui.Panel.Layout.Flow('horizontal')
+}));
+
+Map.add(legend);
