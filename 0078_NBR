@@ -1,0 +1,46 @@
+// Load the AOI (Area of Interest)
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+
+// Check if AOI is properly loaded
+print("AOI:", aoi);
+
+// Define time range
+var startyear = 2022; 
+var endyear = 2022;
+var startmonth = 1; 
+var endmonth = 12;
+
+// Compute beginning & end of the study period
+var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
+var end_date = ee.Date.fromYMD(endyear, endmonth, 31);
+
+// Import Sentinel-2 ImageCollection
+var sentinel2 = ee.ImageCollection("COPERNICUS/S2")
+                  .filterBounds(aoi) // Filter by AOI
+                  .filterDate(start_date, end_date) // Specify time range
+                  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20)) // Filter low-cloud images
+                  .select(['B8', 'B11']) // Select NIR (B8) and SWIR (B11) bands
+                  .median(); // Composite for the year
+
+// Calculate Burn Area Index (BAI)
+var bai = sentinel2.expression(
+  '(B11 - B8) / (B11 + B8)', {
+    B8: sentinel2.select('B8'),  // NIR
+    B11: sentinel2.select('B11') // SWIR
+  }
+).rename('Burn_Area_Index');
+
+// Clip Burn Area Index to AOI
+var baiClipped = bai.clip(aoi);
+
+// Apply a threshold to detect burned areas (BAI < 0.3)
+var burnedArea = baiClipped.lt(0.3).rename('Burned_Area');
+
+// Add Burn Area Index to Map with custom visualization
+Map.centerObject(aoi, 9);
+Map.addLayer(baiClipped, 
+  {min: -0.5, max: 0.5, palette: ['blue', 'white', 'red']},  // Adjusted palette for BAI
+  'Burn Area Index');
+
+// Add Burned Area Mask (BAI < 0.3) to Map
+Map.addLayer(burnedArea, {min: 0, max: 1, palette: ['black', 'red']}, 'Burned Area (BAI < 0.3)');
