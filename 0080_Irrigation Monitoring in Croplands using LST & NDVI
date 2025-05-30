@@ -1,0 +1,101 @@
+// --------------------------------------------
+// 1. Define Area of Interest (AOI)
+// --------------------------------------------
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Pune_Division_Boundary');
+Map.centerObject(aoi, 10);
+
+// --------------------------------------------
+// 2. Load Landsat 8 Surface Reflectance & Thermal data
+// --------------------------------------------
+var landsat = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+  .filterBounds(aoi)
+  .filterDate('2022-01-01', '2022-12-31')
+  .filter(ee.Filter.lt('CLOUD_COVER', 10))
+  .map(function(image) {
+    return image.clip(aoi);
+  });
+
+// --------------------------------------------
+// 3. Preprocessing: Convert DN to TOA Reflectance and Temperature
+// --------------------------------------------
+var scaleFactors = function(image) {
+  var opticalBands = image.select(['SR_B.*']).multiply(0.0000275).add(-0.2);
+  var thermalBand = image.select('ST_B10').multiply(0.00341802).add(149.0);
+  return image.addBands(opticalBands, null, true)
+              .addBands(thermalBand.rename('LST'), null, true);
+};
+
+landsat = landsat.map(scaleFactors);
+
+// --------------------------------------------
+// 4. Compute NDVI = (NIR - RED) / (NIR + RED)
+// --------------------------------------------
+landsat = landsat.map(function(img) {
+  var ndvi = img.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI');
+  return img.addBands(ndvi);
+});
+
+// --------------------------------------------
+// 5. Filter vegetation pixels (NDVI > 0.3) and get mean NDVI and LST
+// --------------------------------------------
+var samples = landsat.map(function(img) {
+  var ndvi = img.select('NDVI');
+  var lst = img.select('LST');
+  return img.addBands(ndvi).addBands(lst);
+});
+
+// --------------------------------------------
+// 6. Visualize one image (optional)
+// --------------------------------------------
+var single = samples.median();
+Map.addLayer(single.select('NDVI'), {min: 0, max: 1, palette: ['white', 'green']}, 'NDVI');
+Map.addLayer(single.select('LST'), {min: 290, max: 320, palette: ['blue', 'red']}, 'LST');
+
+// --------------------------------------------
+// 7. Scatter Plot: NDVI vs. LST (Water Stress Indicator)
+// --------------------------------------------
+var chart = ui.Chart.image.series({
+  imageCollection: samples.select(['NDVI', 'LST']),
+  region: aoi.geometry(),
+  reducer: ee.Reducer.mean(),
+  scale: 100,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'NDVI and LST Time Series (2022)',
+  vAxis: {title: 'Value'},
+  lineWidth: 2,
+  colors: ['green', 'red']
+});
+print(chart);
+
+// --------------------------------------------
+// 8. Simple Indicator: Crop Water Stress Index (CWSI)
+// CWSI = (LST - LSTmin) / (LSTmax - LSTmin)
+// Higher CWSI = More stress (less irrigation)
+// --------------------------------------------
+var lstStats = samples.select('LST').reduce(ee.Reducer.minMax());
+var withCWSI = samples.map(function(img) {
+  var cswi = img.select('LST')
+    .subtract(lstStats.select('LST_min'))
+    .divide(lstStats.select('LST_max').subtract(lstStats.select('LST_min')))
+    .rename('CWSI');
+  return img.addBands(cswi);
+});
+
+var cswiImage = withCWSI.median().select('CWSI');
+// Define visualization parameters with 5 color classes
+var visParams = {
+  min: 0,
+  max: 1,
+  palette: [
+    '#ff0000', // 0.0 - 0.2 (Very Low - Red)
+    '#ffa500', // 0.2 - 0.4 (Low - Orange)
+    '#ffff00', // 0.4 - 0.6 (Moderate - Yellow)
+    '#00ff00', // 0.6 - 0.8 (High - Green)
+    '#0000ff'  // 0.8 - 1.0 (Very High - Blue)
+  ]
+};
+
+// Add the layer to the map
+Map.addLayer(cswiImage, visParams, 'Irrigation Monitoring in Croplands using LST & NDVI');
+
