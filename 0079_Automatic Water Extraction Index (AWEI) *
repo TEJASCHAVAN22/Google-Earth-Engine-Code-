@@ -1,0 +1,45 @@
+// Define Area of Interest (AOI)
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/Rahta_shp');
+Map.centerObject(aoi, 8);
+// -----------------------------------------------------------------------------
+// 1. Load Sentinel-2 Surface Reflectance data
+// -----------------------------------------------------------------------------
+var s2 = ee.ImageCollection("COPERNICUS/S2_SR")
+   .filterBounds(aoi)
+   .filterDate('2022-01-01', '2022-12-31')// India center point
+   .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 10))
+   .median();
+
+// -----------------------------------------------------------------------------
+// 2. Select required bands for AWEI
+// Sentinel-2 band mapping:
+// GREEN = B3, NIR = B8, SWIR1 = B11, SWIR2 = B12
+// -----------------------------------------------------------------------------
+var green = s2.select('B3');
+var nir = s2.select('B8');
+var swir1 = s2.select('B11');
+var swir2 = s2.select('B12');
+
+// -----------------------------------------------------------------------------
+// 3. Compute AWEI using the given formula
+// AWEI = 4 + (GREEN - SWIR2) * (0.25 + NIR + 2.75 * SWIR1)
+// -----------------------------------------------------------------------------
+var awei = green.subtract(swir2)
+    .multiply(nir
+    .add(swir1
+    .multiply(2.75))
+    .add(0.25))
+    .add(4)
+    .rename('AWEI');
+
+// -----------------------------------------------------------------------------
+// 4. Visualize the AWEI result
+// -----------------------------------------------------------------------------
+var visParams = {
+  min: -1,
+  max: 1,
+  palette: ['ffffff', 'blue']
+};
+
+Map.centerObject(aoi, 8);
+Map.addLayer(awei.clip(aoi), visParams, 'AWEI');
