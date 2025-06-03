@@ -1,0 +1,86 @@
+// 1. Define AOI
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 4);
+
+// 2. Load POI-based 3-class land use data
+var landUse_3class = ee.ImageCollection("projects/sat-io/open-datasets/ORNL/grid_3c");
+
+// 3. Enhanced visualization parameters for 3-class land use
+var landUseVis = {
+  bands: 'classification',
+  min: 10, 
+  max: 30, 
+  palette: ['#00b894', '#6c5ce7', '#ffeaa7'] // Open Space, Residential, Non-Residential
+};
+
+// 4. Mosaic and visualize
+var landUseMosaic = landUse_3class.mosaic();
+Map.addLayer(landUseMosaic.clip(aoi), landUseVis, 'POI-based Land Use Classification');
+
+// 5. Legend Panel
+var legendPanel = ui.Panel({
+  style: {
+    position: 'bottom-left',
+    padding: '8px',
+    backgroundColor: 'white',
+    border: '1px solid #cccccc'
+  }
+});
+
+var legendTitle = ui.Label({
+  value: 'Land Use Classes',
+  style: {fontWeight: 'bold', fontSize: '14px', margin: '0 0 4px 0'}
+});
+legendPanel.add(legendTitle);
+
+var makeRow = function(color, name) {
+  var colorBox = ui.Label({
+    style: {backgroundColor: color, padding: '8px', margin: '0 0 4px 0'}
+  });
+  var description = ui.Label({
+    value: name,
+    style: {margin: '0 0 4px 6px'}
+  });
+  return ui.Panel({
+    widgets: [colorBox, description],
+    layout: ui.Panel.Layout.Flow('horizontal')
+  });
+};
+
+legendPanel.add(makeRow('#00b894', 'Open Space'));
+legendPanel.add(makeRow('#6c5ce7', 'Residential'));
+legendPanel.add(makeRow('#ffeaa7', 'Non-Residential'));
+
+Map.add(legendPanel);
+
+// 6. Info Panel (optional, descriptive)
+var infoPanel = ui.Panel({
+  style: {
+    position: 'bottom-right',
+    padding: '8px',
+    backgroundColor: 'white',
+    width: '300px',
+    border: '1px solid #cccccc'
+  }
+});
+
+// 7. Area calculation for each class (km²)
+var classNames = {
+  10: 'Open Space',
+  20: 'Residential',
+  30: 'Non-Residential'
+};
+
+[10, 20, 30].forEach(function(classValue) {
+  var singleClass = landUseMosaic.eq(classValue).selfMask();
+  var areaImage = singleClass.multiply(ee.Image.pixelArea()).divide(1e6); // in km²
+
+  var area = areaImage.reduceRegion({
+    reducer: ee.Reducer.sum(),
+    geometry: aoi.geometry(),
+    scale: 30,
+    maxPixels: 1e13
+  });
+
+  print(classNames[classValue] + ' Area (km²):', area);
+});
