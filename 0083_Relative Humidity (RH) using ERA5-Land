@@ -1,0 +1,95 @@
+// Define Area of Interest (AOI)
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Central_Chanda/Division_Boudry_Chandrapur');
+Map.centerObject(aoi, 8);
+
+// Load ERA5-Land Hourly data
+var era5 = ee.ImageCollection("ECMWF/ERA5_LAND/HOURLY")
+  .filterBounds(aoi)
+  .filterDate('2024-04-01', '2024-04-10');
+
+// Function to calculate RH for each image
+var computeRH = function(image) {
+  var T = image.select('temperature_2m').subtract(273.15); // °C
+  var Td = image.select('dewpoint_temperature_2m').subtract(273.15); // °C
+  var rh = Td.expression(
+    '100 * (exp((17.625 * Td) / (243.04 + Td)) / exp((17.625 * T) / (243.04 + T)))',
+    { T: T, Td: Td }
+  ).rename('RH');
+  return rh.set('system:time_start', image.get('system:time_start'));
+};
+
+// Apply RH computation
+var rhCollection = era5.map(computeRH);
+
+// Time series chart
+var chart = ui.Chart.image.series({
+  imageCollection: rhCollection,
+  region: aoi,
+  reducer: ee.Reducer.mean(),
+  scale: 1000,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'Relative Humidity Time Series (April 2024)',
+  vAxis: { title: 'Relative Humidity (%)', minValue: 0, maxValue: 100 },
+  hAxis: { title: 'Date' },
+  lineWidth: 2,
+  pointSize: 3,
+  series: { 0: { color: 'blue' } }
+});
+print(chart);
+
+// Show RH map of the latest image
+var latestRH = rhCollection.sort('system:time_start', false).first();
+var rhPalette = [
+  '#0000FF', '#8A2BE2', '#FF00FF', '#800000', '#FF0000',
+  '#FF7F00', '#FFFF00', '#7FFF00', '#00FF00', '#00FFFF'
+];
+Map.addLayer(latestRH.clip(aoi), {
+  min: 0,
+  max: 100,
+  palette: rhPalette
+}, 'Latest RH (%) — 10 Classes');
+
+// ----- Add Legend -----
+var legend = ui.Panel({
+  style: {
+    position: 'bottom-left',
+    padding: '8px 15px'
+  }
+});
+var legendTitle = ui.Label({
+  value: 'RH (%) Ranges',
+  style: {
+    fontWeight: 'bold',
+    fontSize: '14px',
+    margin: '0 0 4px 0',
+    padding: '0'
+  }
+});
+legend.add(legendTitle);
+
+var rhRanges = [
+  '0–10', '11–20', '21–30', '31–40', '41–50',
+  '51–60', '61–70', '71–80', '81–90', '91–100'
+];
+
+for (var i = 0; i < rhPalette.length; i++) {
+  var colorBox = ui.Label({
+    style: {
+      backgroundColor: rhPalette[i],
+      padding: '8px',
+      margin: '0 4px 0 0'
+    }
+  });
+  var description = ui.Label({
+    value: rhRanges[i] + '%',
+    style: { margin: '0 0 4px 0' }
+  });
+
+  var legendRow = ui.Panel({
+    widgets: [colorBox, description],
+    layout: ui.Panel.Layout.Flow('horizontal')
+  });
+  legend.add(legendRow);
+}
+Map.add(legend);
