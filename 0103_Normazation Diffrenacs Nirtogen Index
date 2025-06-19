@@ -1,0 +1,42 @@
+var coords = [[74.2, 18.6],
+              [74.3, 18.6],
+              [74.3, 18.5],
+              [74.2, 18.5]];
+    
+var aoi = ee.FeatureCollection([
+  ee.Feature(ee.Geometry.Polygon([coords], null, false), {
+    "system:index": "0"
+  })
+]);
+Map.centerObject(aoi, 12);
+
+var startyear = 2019; 
+var endyear = 2019;
+var startmonth = 1; 
+var endmonth = 12; 
+
+// Compute beginning & end of study period + sequence of months & years
+var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
+var end_date = ee.Date.fromYMD(endyear , endmonth, 30);
+var years = ee.List.sequence(startyear, endyear);
+var months = ee.List.sequence(startmonth,endmonth);
+
+// Load the Santianal Dataset
+var santianal = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+                                    .filterBounds(aoi)
+                                    .filterDate(start_date, end_date);
+                                   
+//---------------------------------------------------------------------------------------//
+// Define the function to calculate NDNI (Normazation Diffrenacs Nirtogen Index
+function calculateNDNI(image) {
+  var swir = image.select('B11');//SWIR band
+  var nir = image.select('B8');//NIR Band
+  
+  var ndni = (nir.subtract(swir)).divide(nir.add(swir));
+  return ndni.rename('NDNI');
+}
+function clipToAoi(image) {
+  return image.clip(aoi);
+}
+var ndniCollection = santianal.map(calculateNDNI).map(clipToAoi);
+Map.addLayer(ndniCollection.first().clip(aoi), {min: -1, max: 100, palette: ['blue', 'white', 'red']}, 'NDNI');
