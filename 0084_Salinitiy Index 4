@@ -1,16 +1,15 @@
-// Cloud Mask Function
+// --------------------------- Cloud Mask & Scaling --------------------------------------
 var maskClouds = function(image) {
-  var cloudProbability = image.select('MSK_CLDPRB'); // Select the cloud probability band
-  return image.updateMask(cloudProbability.lt(10)); // Return image masking out cloudy areas (cloud probability < 50%)
+  var cloudProbability = image.select('MSK_CLDPRB');
+  return image.updateMask(cloudProbability.lt(10));
 };
 
-var scale = (function(image) {
-                    return image
-                      .multiply(0.0001) // Scaling factor for Sentinel-2 SR
-                      .copyProperties(image, ['system:time_start']);
-                  });
-//----------------------------------------------------------------------------------------------------
+var scale = function(image) {
+  return image.multiply(0.0001)
+              .copyProperties(image, ['system:time_start']);
+};
 
+// ---------------------------- Define AOI ----------------------------------------------
 var coords = [[74.2, 18.6],
               [74.3, 18.6],
               [74.3, 18.5],
@@ -23,38 +22,50 @@ var aoi = ee.FeatureCollection([
 ]);
 Map.centerObject(aoi, 12);
 
-//-----------------------------------------------------------------------------
+// --------------------------- Date Range -----------------------------------------------
 var startyear = 2019; 
 var endyear = 2019;
 var startmonth = 1; 
 var endmonth = 12; 
 
-// Compute beginning & end of study period + sequence of months & years
 var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
 var end_date = ee.Date.fromYMD(endyear , endmonth, 30);
-var years = ee.List.sequence(startyear, endyear);
-var months = ee.List.sequence(startmonth,endmonth);
 
-// Load the Santianal Dataset
-var santianal = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-                                    .filterBounds(aoi)
-                                    .map(maskClouds)
-                                    .map(scale)
-                                    .filterDate(start_date, end_date);
+// ------------------------ Load & Preprocess Sentinel-2 -------------------------------
+var s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+            .filterBounds(aoi)
+            .filterDate(start_date, end_date)
+            .map(maskClouds)
+            .map(scale);
 
-//---------------------------------------------------------------------------------------//
-//  Salinitiy Index 4 (SI_4)
-//---------------------------------------------------------------------------------------//
-
+// --------------------------- Salinity Index 4 -----------------------------------------
 var si4 = function(image) {
-  var nir = image.select('B8');  // Near Infrared band (770-860 nm)
-  var red = image.select('B4');  // Red band (660-680 nm)
-  var green = image.select('B3');  // Green band (530-570 nm)
-  return nir.multiply(red).divide(green);
+  var nir = image.select('B8');
+  var red = image.select('B4');
+  var green = image.select('B3');
+  var si4 = nir.multiply(red).divide(green).rename('SI_4');
+  return si4.copyProperties(image, ['system:time_start']);
 };
-var SICollection = santianal.map(si4);
-Map.addLayer(SICollection, {min: 0, max: 10, palette: ['blue', 'white', 'red']}, 'Salinity Index 4');
 
+var si4Collection = s2.map(si4);
 
+// ------------------------ Display First SI_4 Layer -------------------------------------
+Map.addLayer(si4Collection.first().clip(aoi), {min: 0, max: 1, palette: ['blue', 'white', 'red']}, 'SI_4 First Image');
 
+// -------------------------- Time Series Chart ------------------------------------------
+var chart = ui.Chart.image.series({
+  imageCollection: si4Collection,
+  region: aoi.geometry(),
+  reducer: ee.Reducer.mean(),
+  scale: 20,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'Salinity Index 4 (SI_4) Time Series - 2019',
+  vAxis: {title: 'SI_4 (unitless)'},
+  hAxis: {title: 'Date'},
+  lineWidth: 2,
+  pointSize: 4,
+  colors: ['#1f78b4']
+});
 
+print(chart);
