@@ -1,3 +1,4 @@
+// Define AOI
 var coords = [[74.2, 18.6],
               [74.3, 18.6],
               [74.3, 18.5],
@@ -10,33 +11,52 @@ var aoi = ee.FeatureCollection([
 ]);
 Map.centerObject(aoi, 12);
 
+// Date range
 var startyear = 2019; 
 var endyear = 2019;
 var startmonth = 1; 
-var endmonth = 12; 
+var endmonth = 12;
 
-// Compute beginning & end of study period + sequence of months & years
 var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
 var end_date = ee.Date.fromYMD(endyear , endmonth, 30);
-var years = ee.List.sequence(startyear, endyear);
-var months = ee.List.sequence(startmonth,endmonth);
 
-// Load the Santianal Dataset
-var santianal = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-                                    .filterBounds(aoi)
-                                    .filterDate(start_date, end_date);
-                                   
-//---------------------------------------------------------------------------------------//
-// Define the function to calculate NDNI (Normazation Diffrenacs Nirtogen Index
+// Load Sentinel-2 Harmonized SR
+var s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+            .filterBounds(aoi)
+            .filterDate(start_date, end_date)
+            .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20)); // optional cloud filter
+
+// Calculate NDNI
 function calculateNDNI(image) {
-  var swir = image.select('B11');//SWIR band
-  var nir = image.select('B8');//NIR Band
-  
-  var ndni = (nir.subtract(swir)).divide(nir.add(swir));
-  return ndni.rename('NDNI');
+  var swir = image.select('B11');
+  var nir = image.select('B8');
+  var ndni = nir.subtract(swir).divide(nir.add(swir)).rename('NDNI');
+  return image.addBands(ndni).set('system:time_start', image.get('system:time_start'));
 }
-function clipToAoi(image) {
-  return image.clip(aoi);
-}
-var ndniCollection = santianal.map(calculateNDNI).map(clipToAoi);
-Map.addLayer(ndniCollection.first().clip(aoi), {min: -1, max: 100, palette: ['blue', 'white', 'red']}, 'NDNI');
+
+// Apply function
+var ndniCollection = s2.map(calculateNDNI).map(function(img) {
+  return img.clip(aoi);
+});
+
+// Display first NDNI layer
+Map.addLayer(ndniCollection.first().select('NDNI'), {min: -1, max: 1, palette: ['blue', 'white', 'red']}, 'NDNI');
+
+// Time Series Chart
+var ndniChart = ui.Chart.image.series({
+  imageCollection: ndniCollection.select('NDNI'),
+  region: aoi.geometry(),
+  reducer: ee.Reducer.mean(),
+  scale: 20,
+  xProperty: 'system:time_start'
+}).setOptions({
+  title: 'NDNI Time Series (Monthly)',
+  vAxis: {title: 'NDNI'},
+  hAxis: {title: 'Date'},
+  lineWidth: 2,
+  pointSize: 4,
+  colors: ['#d73027']
+});
+
+// Print the chart
+print(ndniChart);
