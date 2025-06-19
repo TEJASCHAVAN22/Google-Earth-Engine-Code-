@@ -1,0 +1,56 @@
+// Cloud Mask Function
+var maskClouds = function(image) {
+  var cloudProbability = image.select('MSK_CLDPRB'); // Select the cloud probability band
+  return image.updateMask(cloudProbability.lt(10)); // Return image masking out cloudy areas (cloud probability < 50%)
+};
+
+var scale = (function(image) {
+                    return image
+                      .multiply(0.0001) // Scaling factor for Sentinel-2 SR
+                      .copyProperties(image, ['system:time_start']);
+                  });
+//----------------------------------------------------------------------------------------------------
+
+var coords = [[74.2, 18.6],
+              [74.3, 18.6],
+              [74.3, 18.5],
+              [74.2, 18.5]];
+    
+var aoi = ee.FeatureCollection([
+  ee.Feature(ee.Geometry.Polygon([coords], null, false), {
+    "system:index": "0"
+  })
+]);
+Map.centerObject(aoi, 12);
+
+// var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Rahta_Shpfile');
+// Map.centerObject(aoi, 12); 
+
+//-----------------------------------------------------------------------------
+var startyear = 2019; 
+var endyear = 2019;
+var startmonth = 1; 
+var endmonth = 12; 
+
+// Compute beginning & end of study period + sequence of months & years
+var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
+var end_date = ee.Date.fromYMD(endyear , endmonth, 30);
+var years = ee.List.sequence(startyear, endyear);
+var months = ee.List.sequence(startmonth,endmonth);
+
+// Load the Santianal Dataset
+var santianal = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+                                    .filterBounds(aoi)
+                                    .map(maskClouds)
+                                    .map(scale)
+                                    .filterDate(start_date, end_date);
+//---------------------------------------------------------------------------------------//
+//  Green Red Vegitation Index (GRVI) 
+//---------------------------------------------------------------------------------------//
+var grvi = function(image) {
+  var green = image.select('B3');  // Green band (560-660 nm)
+  var red = image.select('B4');  // Red band (660-680 nm)
+  return (green.subtract(red)).divide(green.add(red));
+};
+var grviCollection = santianal.map(grvi);
+Map.addLayer(grviCollection, {min: -1, max: 1, palette: ['blue', 'white', 'red']}, 'GRVI');
