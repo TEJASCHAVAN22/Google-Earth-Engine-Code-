@@ -1,0 +1,56 @@
+// Cloud Mask Function
+var maskClouds = function(image) {
+  var cloudProbability = image.select('MSK_CLDPRB'); // Select the cloud probability band
+  return image.updateMask(cloudProbability.lt(10)); // Return image masking out cloudy areas (cloud probability < 50%)
+};
+
+var scale = (function(image) {
+                    return image
+                      .multiply(0.0001) // Scaling factor for Sentinel-2 SR
+                      .copyProperties(image, ['system:time_start']);
+                  });
+//----------------------------------------------------------------------------------------------------
+
+var coords = [[74.2, 18.6],
+              [74.3, 18.6],
+              [74.3, 18.5],
+              [74.2, 18.5]];
+    
+var aoi = ee.FeatureCollection([
+  ee.Feature(ee.Geometry.Polygon([coords], null, false), {
+    "system:index": "0"
+  })
+]);
+Map.centerObject(aoi, 12);
+
+//-----------------------------------------------------------------------------
+var startyear = 2019; 
+var endyear = 2019;
+var startmonth = 1; 
+var endmonth = 12; 
+
+// Compute beginning & end of study period + sequence of months & years
+var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
+var end_date = ee.Date.fromYMD(endyear , endmonth, 30);
+var years = ee.List.sequence(startyear, endyear);
+var months = ee.List.sequence(startmonth,endmonth);
+
+// Load the Santianal Dataset
+var santianal = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+                                    .filterBounds(aoi)
+                                    .map(maskClouds)
+                                    .map(scale)
+                                    .filterDate(start_date, end_date);
+
+//---------------------------------------------------------------------------------------//
+// Mosaic Simple Ratio
+//---------------------------------------------------------------------------------------//
+
+var msr = function(image) {
+  var red = image.select('B4');  // Red band (660-680 nm)
+  var nir = image.select('B8');  // Near-infrared band (780-1400 nm)
+  return nir.divide(red);
+};
+var msrCollection = santianal.map(msr);
+Map.addLayer(msrCollection, {min: 0, max: 10, palette: ['blue', 'white', 'red']}, 'Mosaic Simple Ratio');
+
