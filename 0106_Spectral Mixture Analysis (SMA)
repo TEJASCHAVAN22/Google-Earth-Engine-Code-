@@ -1,0 +1,45 @@
+var coords = [[74.2, 18.6],
+              [74.3, 18.6],
+              [74.3, 18.5],
+              [74.2, 18.5]];
+    
+var aoi = ee.FeatureCollection([
+  ee.Feature(ee.Geometry.Polygon([coords], null, false), {
+    "system:index": "0"
+  })
+]);
+Map.centerObject(aoi, 12);
+
+var startyear = 2019; 
+var endyear = 2019;
+var startmonth = 1; 
+var endmonth = 12; 
+
+// Compute beginning & end of study period + sequence of months & years
+var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
+var end_date = ee.Date.fromYMD(endyear , endmonth, 30);
+var years = ee.List.sequence(startyear, endyear);
+var months = ee.List.sequence(startmonth,endmonth);
+
+// Load the Santianal Dataset
+var santianal = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+                                    .filterBounds(aoi)
+                                    .filterDate(start_date, end_date);
+                                   
+//---------------------------------------------------------------------------------------------------------//
+function performSMA(image) {
+  var swir = image.select('B11'); // assuming SWIR band is Band 11
+  var swir_veg = ee.Image.constant(0.25); // reflectance value of vegetation endmember in SWIR band
+  var swir_soil = ee.Image.constant(0.05); // reflectance value of soil endmember in SWIR band
+  
+  var f_veg = swir.subtract(swir_soil).divide(swir_veg.subtract(swir_soil));
+  var f_soil = ee.Image.constant(1).subtract(f_veg);
+  
+  return ee.Image.cat([f_veg, f_soil]).rename(['f_veg', 'f_soil']);
+}
+var smaCollectionVeg = santianal.map(performSMA).map(clipToAoi);
+var smaCollectionSoil = santianal.map(performSMA).map(clipToAoi);
+
+// Visualize the SMA results
+Map.addLayer(smaCollectionVeg.first().clip(aoi).select('f_veg'), {min: 0, max: 1, palette: ['green', 'white']}, '(SAM) Vegetation Fraction');
+Map.addLayer(smaCollectionSoil.first().clip(aoi).select('f_soil'), {min: 0, max: 1, palette: ['brown', 'white']}, '(SAM) Soil Fraction');
