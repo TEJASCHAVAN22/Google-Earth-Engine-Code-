@@ -1,0 +1,48 @@
+// Define ROI (Replace with your actual ROI)
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 6);
+// Load MODIS land cover data and filter by country and date range
+var Cropland = ee.ImageCollection("MODIS/061/MCD12Q1")
+                                  .select('LC_Type1')
+                                  .filterBounds(aoi)
+                                  .filterDate('2001-01-01', '2023-01-01');
+                                  
+print('Number of images in the collection:', Cropland.size());
+
+// Select the first image from the collection
+var firstImage = Cropland.first();
+
+// Process the Cropland areas by clipping and identifying Cropland class (value 13 for Cropland land)
+var CroplandCover = Cropland.map(function(image) {
+  var cliped = image.clip(aoi); // Clip the image to the country boundary
+  var CroplandClass = cliped.eq(13);  // Cropland land class is represented by the value 13
+  var maskedCropland = CroplandClass.updateMask(CroplandClass); // Mask the Cropland class areas
+  var CroplandAreaInKm2 = maskedCropland.multiply(ee.Image.pixelArea().divide(1e6)); 
+  // Convert area to km² and 1e4 for convert to ha ,1for converting m²
+  return CroplandAreaInKm2.copyProperties(image, ['system:time_start', 'system:time_end']);
+});
+
+// Create a time series chart showing Cropland area growth
+print(ui.Chart.image.series({
+  imageCollection: CroplandCover,
+  region: aoi,
+  reducer: ee.Reducer.sum(),
+  scale: 500,
+  xProperty: 'system:time_start'
+}).setSeriesNames(['Cropland Agricultural AREA  Growth km2']).setOptions({
+  title: 'Cropland Agricultural AREA  Growth',
+  hAxis: {title: 'Year'},
+  vAxis: {title: 'Cropland Agricultural AREA  (km²)'},
+  interpolateNulls: true,
+  lineWidth: 1,
+  pointSize: 2,
+  curveType: 'function'
+}));
+
+// Add the Cropland growth layer to the map
+Map.addLayer(CroplandCover.sum(),
+{min: 32.25081287384033,
+max: 511.47217334747313,
+palette: ['red']}, 'Cropland Area Growth');
+
+
