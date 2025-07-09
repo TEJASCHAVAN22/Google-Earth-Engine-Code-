@@ -1,0 +1,102 @@
+// ----------------------------------------------
+// 1. Define Region of Interest (ROI)
+// ----------------------------------------------
+// 1. Load AOI
+var roi = ee.FeatureCollection('projects/gee-trial2/assets/Central_Chanda/Division_Boudry_Chandrapur');
+Map.centerObject(roi, 10);
+
+// ----------------------------------------------
+// 2. ERA5 Wind Speed Calculation (2010–2024)
+// ----------------------------------------------
+var era5 = ee.ImageCollection("ECMWF/ERA5/DAILY")
+                           .select('u_.*', 'v_.*')
+                           .filterDate('2010', '2024');
+
+var windspeed = era5.map(function(img) {
+  var eq = img.expression(
+    'sqrt((u**2) + (v**2))',
+    {
+      'u': img.select('u_.*'),
+      'v': img.select('v_.*')
+    }
+  ).rename('wind_speed');
+  
+  return eq.copyProperties(img, img.propertyNames());
+});
+
+// ----------------------------------------------
+// 3. Display Wind Speed Time Series Chart
+// ----------------------------------------------
+print(
+  ui.Chart.image.series({
+    imageCollection: windspeed,
+    region: roi,
+    reducer: ee.Reducer.mean(),
+    scale: 27000,
+    xProperty: 'system:time_start'
+  }).setOptions({
+    title: 'ERA5 Wind Speed Time Series (2010–2024)',
+    vAxis: {title: 'Wind Speed (m/s)'},
+    hAxis: {title: 'Date'},
+    lineWidth: 2,
+    pointSize: 4
+  })
+);
+
+// ----------------------------------------------
+// 4. Historical Wind Speed Export (1980–2020)
+// ----------------------------------------------
+var wind40 = ee.ImageCollection("ECMWF/ERA5/DAILY")
+                        .filterDate('1980', '2020');
+
+var windspeed40 = wind40.map(function(img) {
+  var eq = img.expression(
+    'sqrt((u**2) + (v**2))',
+    {
+      'u': img.select('u_.*'),
+      'v': img.select('v_.*')
+    }
+  ).rename('wind_speed');
+  
+  return eq.copyProperties(img, img.propertyNames());
+});
+
+// ----------------------------------------------
+// 5. Extract Mean Wind Speed per Image and Format
+// ----------------------------------------------
+function get_value(img) {
+  var date = ee.Date(ee.Image(img).get('system:time_start')).format().slice(0, 10);
+  var value = ee.Number(
+    ee.Image(img).reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: roi,
+      scale: 27000
+    }).values().get(0)
+  );
+  return [date, value];
+}
+
+var size = windspeed40.size();
+var windlist = windspeed40.toList(size).map(get_value);
+
+// ----------------------------------------------
+// 6. Convert List to FeatureCollection
+// ----------------------------------------------
+var wind_feature = ee.FeatureCollection(
+  windlist.map(function(el) {
+    el = ee.List(el);
+    return ee.Feature(null, {
+      'date': ee.String(el.get(0)),
+      'windspeed': ee.String(el.get(1))
+    });
+  })
+);
+
+// ----------------------------------------------
+// 7. Export to Google Drive as CSV
+// ----------------------------------------------
+Export.table.toDrive({
+  collection: wind_feature,
+  description: 'windspeed40',
+  fileFormat: 'CSV'
+});
