@@ -1,0 +1,110 @@
+// --------------------------------------------
+// Sulfur Dioxide (SO2) Monitoring using Sentinel-5P
+// --------------------------------------------
+
+// Define Area of Interest (modify as needed)
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 8);
+
+// Load Sentinel-5P SO2 dataset
+var so2 = ee.ImageCollection('COPERNICUS/S5P/NRTI/L3_SO2')
+            .select('SO2_column_number_density')
+            .filterDate('2025-01-01', '2025-08-01') // Modify time period
+            .filterBounds(aoi);
+
+// Print to check availability
+print('SO2 collection', so2);
+
+// Calculate mean composite for visual analysis
+var so2_mean = so2.mean();
+
+// Visualization parameters
+var visParams = {
+  min: 0.00005,
+  max: 0.0005,
+  palette: ['black', 'blue', 'purple', 'cyan', 'green', 'yellow', 'red']
+};
+
+// Center map and add layer
+Map.centerObject(aoi, 6);
+Map.addLayer(so2_mean.clip(aoi), visParams, 'Mean SO₂ (mol/m²)');
+
+// --------------------------------------------
+// Time Series Chart for SO2 Monitoring
+// --------------------------------------------
+// Function to reduce each image to a mean SO2 over AOI
+var chartData = so2.map(function(image) {
+  var mean = image.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: aoi.geometry(),
+    scale: 1000,
+    maxPixels: 1e9
+  });
+  return ee.Feature(null, {
+    'date': image.date().format('YYYY-MM-dd'),
+    'SO2': mean.get('SO2_column_number_density')
+  });
+});
+
+// Convert to FeatureCollection for charting
+var so2ChartCollection = ee.FeatureCollection(chartData);
+
+// Plot the chart
+var chart = ui.Chart.feature.byFeature(so2ChartCollection, 'date', 'SO2')
+  .setChartType('LineChart')
+  .setOptions({
+    title: 'SO₂ Monitoring Over Time',
+    hAxis: { title: 'Date' },
+    vAxis: { title: 'SO₂ (mol/m²)', minValue: 0 },
+    lineWidth: 2,
+    pointSize: 4,
+    colors: ['red']
+  });
+
+print(chart);
+
+// --------------------------------------------
+// Legend for SO2 Levels
+// --------------------------------------------
+
+var legend = ui.Panel({
+  style: {
+    position: 'bottom-left',
+    padding: '8px 15px'
+  }
+});
+
+var legendTitle = ui.Label({
+  value: 'SO₂ Levels (mol/m²)',
+  style: {fontWeight: 'bold', fontSize: '14px', margin: '0 0 4px 0'}
+});
+legend.add(legendTitle);
+
+// Define categories and matching palette colors
+var labels = ['Very Low', 'Low', 'Moderate', 'High', 'Very High'];
+var colors = ['black', 'blue', 'cyan', 'yellow', 'red'];
+
+// Loop through and build the legend
+for (var i = 0; i < labels.length; i++) {
+  var colorBox = ui.Label('', {
+    backgroundColor: colors[i],
+    padding: '8px',
+    margin: '0 0 4px 0'
+  });
+
+  var description = ui.Label(labels[i], {
+    margin: '0 0 4px 6px'
+  });
+
+  var row = ui.Panel({
+    widgets: [colorBox, description],
+    layout: ui.Panel.Layout.Flow('horizontal')
+  });
+
+  legend.add(row);
+}
+
+// Add the legend to the map
+Map.add(legend);
+
+
