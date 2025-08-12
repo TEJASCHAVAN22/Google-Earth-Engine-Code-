@@ -1,0 +1,62 @@
+var aoi = ee.Geometry.Polygon(
+        [[[77.61469788772884, 10.713527977801562],
+          [77.61469788772884, 10.103017347509152],
+          [78.07612366897884, 10.103017347509152],
+          [78.07612366897884, 10.713527977801562]]], null, false);
+
+// AOI and Date Range
+
+var start_date = '2023-01-01';
+var end_date = '2023-12-31';
+
+// Function to calculate TOA Spectral Radiance
+function calc_toa_radiance(img) {
+  var ML = ee.Number(img.get('RADIANCE_MULT_BAND_10'));
+  var AL = ee.Number(img.get('RADIANCE_ADD_BAND_10'));
+  var thermal = img.select('B10'); // Thermal band from Level-1
+  var toa_radiance = thermal.multiply(ML).add(AL).rename('TOA_Radiance');
+  return img.addBands(toa_radiance);
+}
+
+// Load Landsat 8 Level-1 Collection
+var collection = ee.ImageCollection('LANDSAT/LC08/C02/T1')
+  .filterBounds(aoi)
+  .filterDate(start_date, end_date)
+  .map(calc_toa_radiance);
+
+// Extract mean TOA Radiance for AOI
+var ts = collection.map(function(img) {
+  var meanDict = img.select('TOA_Radiance').reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: aoi,
+    scale: 30,
+    maxPixels: 1e13
+  });
+  return ee.Feature(null, {
+    'date': img.date().format('YYYY-MM-dd'),
+    'TOA_Radiance': meanDict.get('TOA_Radiance')
+  });
+});
+
+// Convert to FeatureCollection
+var ts_fc = ee.FeatureCollection(ts);
+
+// Print time series table
+print('TOA Spectral Radiance Time Series', ts_fc);
+
+// Chart the results
+var chart = ui.Chart.feature.byFeature(ts_fc, 'date', 'TOA_Radiance')
+  .setOptions({
+    title: 'TOA Spectral Radiance Time Series (Thermal Band)',
+    hAxis: {title: 'Date'},
+    vAxis: {title: 'Radiance (W/m²/sr/µm)'},
+    lineWidth: 2,
+    pointSize: 4
+  });
+print(chart);
+
+// Visualization
+Map.centerObject(aoi, 8);
+Map.addLayer(collection.first().select('TOA_Radiance'),
+  {min: 0, max: 20, palette: ['blue', 'green', 'red']},
+  'First Image TOA Radiance');
