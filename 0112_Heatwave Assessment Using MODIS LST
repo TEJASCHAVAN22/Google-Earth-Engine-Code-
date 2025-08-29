@@ -1,0 +1,60 @@
+var startyear = 2000;
+var endyear = 2022;
+var startmonth = 1; 
+var endmonth = 12; 
+
+// Compute beginning & end of study period + sequence of months & years
+var start_date = ee.Date.fromYMD(startyear, startmonth, 1);
+var end_date = ee.Date.fromYMD(endyear , endmonth, 30);
+var years = ee.List.sequence(startyear, endyear);
+var months = ee.List.sequence(startmonth,endmonth);
+
+//----------------------dataset & Study Area----------------------------------------------
+var aoi = ee.FeatureCollection('projects/gee-trial2/assets/Shapfile/WMH_Distric');
+Map.centerObject(aoi, 5);
+
+var modisLST = ee.ImageCollection('MODIS/006/MOD11A2')
+                                    .filterDate(start_date, end_date)
+                                    .select('LST_Day_1km');
+                                    
+print('Collection' , modisLST) 
+
+//--Function to convert MODIS LST from Kelvin to Celsius---------//
+var kelvinToCelsius = function(image) {
+  return image.multiply(0.02).subtract(273.15).rename('LST_Celsius');
+};
+
+var modisLST_Celsius = modisLST.map(kelvinToCelsius);
+
+// Function to identify heat wave days
+var heatWaveThreshold = 10; // Change to 30 for hilly areas
+
+var identifyHeatWaveDays = function(image) {
+  var heatWave = image.lt(heatWaveThreshold).rename('HeatWave');
+  return image.addBands(heatWave);
+};
+
+var heatWaveDays = modisLST_Celsius.map(identifyHeatWaveDays);
+var totalHeatWaveDays = heatWaveDays.select('HeatWave').sum().rename('TotalHWD');
+
+print('total HeatWave Days', totalHeatWaveDays)
+
+//-----Normalize the heat wave days to create the HNI-----//
+var maxHeatWaveDays = totalHeatWaveDays.reduceRegion({
+  reducer: ee.Reducer.max(),
+  geometry: aoi, // Define your area of interest (AOI) here
+  scale: 1000,
+  bestEffort: true
+});
+
+var hni = totalHeatWaveDays.divide(ee.Number(maxHeatWaveDays.get('TotalHWD'))).rename('HNI');
+print('HNI', hni)
+
+// Visualization parameters
+var visParams = {
+  min: 0.0,
+  max: 0.1,
+  palette: ['blue', 'yellow', 'red']
+};
+Map.addLayer(hni.clip(aoi), visParams, 'HeatWave Normalized Index (HNI)');
+
